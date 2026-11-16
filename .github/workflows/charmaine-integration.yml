@@ -1,0 +1,35 @@
+name: Charmaine local OAuth and RLS
+
+on:
+  pull_request:
+    paths:
+      - "tests/integration/**"
+      - "supabase/functions/charmaine-mcp/**"
+      - ".github/workflows/charmaine-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tests/integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.8
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+      - run: deno task check
+      - run: deno task test:guards
+      - run: deno task lint
+      - run: deno task fmt
+      # All services are disposable containers on this runner. No project link,
+      # hosted credentials, migrations to a remote DB, or deployments are used.
+      - run: deno task test

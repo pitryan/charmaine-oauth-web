@@ -1,0 +1,12 @@
+{
+  "nodeModulesDir": "none",
+  "compilerOptions": { "strict": true },
+  "exclude": [".work/"],
+  "tasks": {
+    "check": "deno check run.ts integration_test.ts safety_test.ts",
+    "test:guards": "deno test --deny-net --deny-env --deny-read --deny-write --deny-run safety_test.ts",
+    "test": "deno run --allow-run=deno,supabase,docker --allow-env --allow-read --allow-write=.work --allow-net=127.0.0.1:55431 run.ts",
+    "lint": "deno lint",
+    "fmt": "deno fmt --check"
+  }
+}
