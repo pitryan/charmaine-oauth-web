@@ -1,0 +1,31 @@
+name: Charmaine MCP checks
+
+on:
+  pull_request:
+    paths:
+      - "supabase/functions/charmaine-mcp/**"
+      - ".github/workflows/charmaine-mcp.yml"
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/charmaine-mcp/**"
+      - ".github/workflows/charmaine-mcp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deno:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions/charmaine-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.8
+      - run: deno task check
+      - run: deno task test
+      - run: deno task lint
+      - run: deno task fmt
