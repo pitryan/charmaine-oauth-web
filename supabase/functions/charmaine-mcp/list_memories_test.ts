@@ -300,6 +300,28 @@ Deno.test("combined filters count all matches before applying pagination", async
   assert.equal(result.offset, 1);
 });
 
+Deno.test("alias listing preserves every editorial status and uncertain clarity", async () => {
+  // Synthetic statuses from the project context, not an assertion about live data.
+  const source: Row[] = ["draft", "canon", "archived", "au"].map(
+    (canon_status, index) => ({
+      memory_key: `fixture-status-${index}`,
+      school_year: "2009/2010",
+      category: "sekolah_dan_kelas",
+      canon_status,
+      clarity: "unspecified",
+    }),
+  );
+  const result = payload(
+    await fixture(source).run({
+      school_year: "2009/2010",
+      category: "sekolah",
+    }),
+  );
+  assert.deepEqual(result.memories, source);
+  assert.equal(result.count, 4);
+  assert.equal(result.total, 4);
+});
+
 Deno.test("successive and partial pages preserve total and stable order", async () => {
   const first = payload(await fixture().run({ category: "kelas", limit: 2 }));
   const second = payload(

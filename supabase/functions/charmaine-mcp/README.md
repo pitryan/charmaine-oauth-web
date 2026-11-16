@@ -71,6 +71,59 @@ review `codex/list-memories-category-aliases`, sesuai
 [konfigurasi Git Vercel](https://vercel.com/docs/project-configuration/git-configuration).
 Workflow MCP hanya menjalankan pemeriksaan dan tidak melakukan deployment.
 
+## Kesesuaian konteks proyek
+
+`CHARMAINE_PROJECT_CONTEXT.md` versi 1.0 (2026-11-16), yang diberikan pengguna,
+menjadi referensi tujuan dan batas proyek. Saat dibandingkan dengan source pada
+2026-11-16:
+
+- Bagian 8.3 tentang filter kategori persis sesuai dengan `main` pada commit
+  `18f0d483`. Branch PR #1 menambahkan normalisasi alias sebelum filter `.eq`
+  yang sama. Status "IN PROGRESS" dalam dokumen mencakup pengerjaan yang kini
+  siap ditinjau; bukan bukti bahwa kode PR sudah aktif di endpoint produksi.
+- `search_memories` tetap mencari substring pada `memory_text` saja. Pencarian
+  judul, tokoh, tags, semantic retrieval, dan tool editorial tetap roadmap.
+- Dokumen menyatakan 73 memori kelas 1 seluruhnya `draft`. Fixture tes dengan
+  status campuran dan tahun lain adalah data sintetis untuk menguji perilaku,
+  bukan salinan atau laporan isi database. Pengujian mempertahankan keempat
+  status `draft`, `canon`, `archived`, `au`, serta `clarity: unspecified`.
+- Detail schema, `owner_id = auth.uid()`, dan syarat klaim OAuth `client_id`
+  dilaporkan oleh dokumen. Repository belum memiliki migration/policy/seed untuk
+  memverifikasi atau mereproduksi keadaan database itu. PR ini tidak mengubah
+  maupun mengaudit ulang kebijakan produksi.
+
+## Verifikasi lanjutan setelah persetujuan terpisah
+
+Langkah berikutnya adalah review PR, lalu menyiapkan pengujian integrasi lokal
+atau staging dengan schema dan RLS yang telah diperiksa, data sintetis, serta
+dua akun uji. Uji OAuth login, approve/deny consent, token tidak
+valid/kedaluwarsa, ketiga tool MCP, serta pembatasan hasil dan `total` untuk
+masing-masing pengguna. Persiapan lingkungan dan deployment bukan bagian dari PR
+alias ini.
+
+Jika endpoint uji sudah menjalankan revisi PR, gunakan contoh berikut melalui
+klien MCP/ChatGPT. Angka di bawah hanya berlaku bila dataset uji meniru
+distribusi kelas 1 dalam dokumen dan akun memiliki akses ke seluruh baris
+tersebut:
+
+| Argumen `list_memories`                                                             | Hasil yang diharapkan                                 |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `{"school_year":"2009/2010","category":"sekolah","limit":5,"offset":0}`             | `count: 5`, `total: 14`, kategori `sekolah_dan_kelas` |
+| `{"school_year":"2009/2010","category":"sekolah_dan_kelas","limit":10,"offset":10}` | `count: 4`, `total: 14`                               |
+| `{"school_year":"2009/2010","limit":5,"offset":0}`                                  | `count: 5`, `total: 73`                               |
+| `{"school_year":"2010/2011","limit":5,"offset":0}`                                  | Kosong hanya jika dataset uji belum berisi kelas 2    |
+
+Bandingkan alias dengan nama baku memakai `school_year`, `limit`, dan `offset`
+yang sama: ID, urutan, total, dan metadata harus identik. Nilai `total` untuk
+akun dengan akses lebih terbatas harus mengikuti RLS. Jangan menyimpulkan
+keadaan produksi dari hasil fixture atau dari angka dalam dokumen konteks.
+
+Sebelum merge, rollback cukup dengan menutup PR tanpa menerapkannya. Jika
+perubahan source sudah digabungkan, gunakan revert commit melalui PR terpisah.
+Revert GitHub tidak otomatis mengembalikan revisi Edge Function; rollback
+runtime setelah deployment memerlukan persetujuan terpisah. Tidak ada
+migrasi/data yang perlu di-rollback dalam perubahan ini.
+
 ## Batas arsitektur
 
 `index.ts` tetap memasang `withOAuthProtectedResource()` diikuti
