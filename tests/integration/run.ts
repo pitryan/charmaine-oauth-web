@@ -187,7 +187,8 @@ async function bootstrap(status: Record<string, string>) {
   async function createUser(label: string) {
     const email =
       `charmaine-local-${label}-${crypto.randomUUID()}@example.invalid`;
-    const password = `Local-${crypto.randomUUID()}-${crypto.randomUUID()}!`;
+    // Fresh high-entropy password within Auth's bcrypt 72-byte maximum.
+    const password = `Local-${crypto.randomUUID()}!`;
     secrets.push(password);
     const response = await localFetch(`${API_URL}/auth/v1/admin/users`, {
       method: "POST",
