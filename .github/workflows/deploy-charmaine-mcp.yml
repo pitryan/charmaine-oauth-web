@@ -1,0 +1,55 @@
+
+name: Charmaine MCP - Deploy Manual
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: charmaine-mcp-production
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.8
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+
+      - name: Test MCP
+        working-directory: supabase/functions/charmaine-mcp
+        run: |
+          deno task check
+          deno task test
+          deno task lint
+          deno task fmt
+
+      - name: Test OAuth dan RLS lokal
+        working-directory: tests/integration
+        run: |
+          deno task check
+          deno task test:guards
+          deno task lint
+          deno task fmt
+          deno task test
+
+      - name: Siapkan konfigurasi CLI
+        run: supabase init
+
+      - name: Deploy Charmaine MCP
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          supabase functions deploy charmaine-mcp --remote=qagkpcxikmpsgisqkqsy --use-api --no-verify-jwt --yes
