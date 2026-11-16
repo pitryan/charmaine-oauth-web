@@ -1,8 +1,11 @@
-
-name: Charmaine MCP - Deploy Manual
+name: Charmaine MCP - Deploy
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/charmaine-mcp/**"
 
 permissions:
   contents: read
