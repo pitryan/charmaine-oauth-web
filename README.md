@@ -1,5 +1,8 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+Pengujian Charmaine MCP: [unit test Deno](supabase/functions/charmaine-mcp/README.md)
+dan [integrasi OAuth/RLS lokal dengan dua akun sintetis](tests/integration/README.md).
+
 ## Getting Started
 
 First, run the development server:

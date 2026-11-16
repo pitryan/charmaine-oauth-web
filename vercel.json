@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "codex/list-memories-category-aliases": false
+      "codex/list-memories-category-aliases": false,
+      "codex/local-oauth-rls-tests": false
     }
   }
 }
