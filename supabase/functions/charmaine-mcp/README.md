@@ -66,9 +66,12 @@ dari direktori fungsi, lalu tinjau perubahan lockfile:
 deno check --frozen=false index.ts list_memories_test.ts
 ```
 
-`vercel.json` di root menonaktifkan deployment otomatis hanya untuk branch
+`vercel.json` di root menonaktifkan deployment otomatis untuk `main` dan branch
 review `codex/list-memories-category-aliases`, sesuai
 [konfigurasi Git Vercel](https://vercel.com/docs/project-configuration/git-configuration).
+Blokir `main` harus tetap ada saat merge agar perubahan GitHub tidak memicu
+deployment website. Pengaktifan kembali deployment Vercel dan deployment manual
+Edge Function Supabase merupakan langkah terpisah setelah persetujuan pengguna.
 Workflow MCP hanya menjalankan pemeriksaan dan tidak melakukan deployment.
 
 ## Kesesuaian konteks proyek
