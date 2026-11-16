@@ -106,12 +106,12 @@ klien MCP/ChatGPT. Angka di bawah hanya berlaku bila dataset uji meniru
 distribusi kelas 1 dalam dokumen dan akun memiliki akses ke seluruh baris
 tersebut:
 
-| Argumen `list_memories`                                                             | Hasil yang diharapkan                                 |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `{"school_year":"2009/2010","category":"sekolah","limit":5,"offset":0}`             | `count: 5`, `total: 14`, kategori `sekolah_dan_kelas` |
-| `{"school_year":"2009/2010","category":"sekolah_dan_kelas","limit":10,"offset":10}` | `count: 4`, `total: 14`                               |
-| `{"school_year":"2009/2010","limit":5,"offset":0}`                                  | `count: 5`, `total: 73`                               |
-| `{"school_year":"2010/2011","limit":5,"offset":0}`                                  | Kosong hanya jika dataset uji belum berisi kelas 2    |
+| Argumen `list_memories`                                                             | Hasil yang diharapkan                                                  |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `{"school_year":"2009/2010","category":"sekolah","limit":5,"offset":0}`             | `count: 5`, `total: 14`, kategori `sekolah_dan_kelas`                  |
+| `{"school_year":"2009/2010","category":"sekolah_dan_kelas","limit":10,"offset":10}` | `count: 4`, `total: 14`                                                |
+| `{"school_year":"2009/2010","limit":5,"offset":0}`                                  | `count: 5`, `total: 73`                                                |
+| `{"school_year":"2010/2011","limit":5,"offset":0}`                                  | `count: 0`, `total: 0` jika tidak ada baris kelas 2 yang diizinkan RLS |
 
 Bandingkan alias dengan nama baku memakai `school_year`, `limit`, dan `offset`
 yang sama: ID, urutan, total, dan metadata harus identik. Nilai `total` untuk
