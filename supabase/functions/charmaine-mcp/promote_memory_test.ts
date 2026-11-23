@@ -202,18 +202,34 @@ Deno.test(
   async () => {
     const missing = new FakeClient([]);
     const archived = fixture("archived");
+    const plan = fixture("draft", { memory_type: "plan" });
     const args = promoteMemorySchema.parse({ memory_key: "memory-001" });
     const missingResult = await promoteMemory(
       missing as unknown as PromoteMemoryClient,
       args,
     );
     const archivedResult = await promoteMemory(archived.client, args);
+    const planResult = await promoteMemory(plan.client, args);
     assert.equal(missingResult.isError, true);
     assert.deepEqual(missingResult, archivedResult);
+    assert.deepEqual(missingResult, planResult);
     assert.equal(missing.updateCalls.length, 0);
     assert.equal(archived.fake.updateCalls.length, 0);
+    assert.equal(plan.fake.updateCalls.length, 0);
   },
 );
+
+Deno.test("missing memory type remains promotable for legacy rows", async () => {
+  const { fake, client } = fixture("draft", { legacy: true });
+  const result = payload(
+    await promoteMemory(
+      client,
+      promoteMemorySchema.parse({ memory_key: "memory-001" }),
+    ),
+  );
+  assert.equal(result.promoted, true);
+  assert.equal(fake.rows[0].canon_status, "canon");
+});
 
 Deno.test("concurrent promotion is returned as an idempotent replay", async () => {
   const { fake, client } = fixture();

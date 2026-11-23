@@ -193,6 +193,20 @@ async function rest(
     { ...init, headers },
   );
 }
+async function rpc(
+  config: TestConfig,
+  token: string,
+  name: string,
+  args: Json,
+): Promise<Response> {
+  const headers = apiHeaders(config, token);
+  headers.set("Content-Type", "application/json");
+  return await localFetch(`${config.apiUrl}/rest/v1/rpc/${name}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(args),
+  });
+}
 Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
   const config = readConfig();
   const metadata = await discovery(config);
@@ -278,7 +292,9 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         assert.deepEqual(
           listed.tools.map((tool) => object(tool, "Expected tool").name).sort(),
           [
+            "correct_memory",
             "create_memory",
+            "delete_memory",
             "list_memories",
             "ping",
             "promote_memory",
@@ -291,6 +307,14 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         );
         const all = await expectList(client, { limit: 20 }, expected.all);
         assert.ok(all.memories.every((row) => row.clarity === "unspecified"));
+        const firstLegacy = all.memories[0];
+        assert.equal(firstLegacy?.title, `LOCAL FIXTURE ${expected.all[0]}`);
+        assert.equal(
+          firstLegacy?.memory_text,
+          `LOCAL FIXTURE shared-fixture ${marker} ${expected.all[0]}`,
+        );
+        assert.ok(firstLegacy && !("memory_type" in firstLegacy));
+        assert.ok(firstLegacy && !("expected_at" in firstLegacy));
         if (marker === "A_ONLY") {
           assert.deepEqual(
             [...new Set(all.memories.map((row) => row.canon_status))].sort(),
@@ -388,6 +412,78 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
     },
   );
   await t.step(
+    "legacy plans stay readable but require correction before canon",
+    async () => {
+      const issued = await authorize(
+        config,
+        metadata,
+        clientId,
+        config.users.a,
+      );
+      const client = new McpClient(config, issued.access_token);
+      await client.initialize();
+
+      const legacy = await expectList(
+        client,
+        { memory_type: "plan", canon_status: "draft", limit: 20 },
+        ["LOCAL-017"],
+      );
+      assert.equal(
+        legacy.memories[0]?.expected_at,
+        "2030-01-01T09:00:00+07:00",
+      );
+
+      const rejected = await client.toolResult("promote_memory", {
+        memory_key: "LOCAL-017",
+      });
+      assert.equal(rejected.isError, true);
+
+      const unconfirmedCorrection = await rpc(
+        config,
+        issued.access_token,
+        "correct_charmaine_memory",
+        {
+          p_memory_key: "LOCAL-017",
+          p_expected_title: "LOCAL FIXTURE LOCAL-017",
+          p_confirmation: "tidak sah",
+          p_changes: { memory_text: "must not be stored" },
+        },
+      );
+      assert.equal(unconfirmedCorrection.status, 400);
+
+      const corrected = jsonContent(
+        await client.tool("correct_memory", {
+          memory_key: "LOCAL-017",
+          expected_title: "LOCAL FIXTURE LOCAL-017",
+          confirmation: "KOREKSI MEMORI",
+          changes: {
+            memory_type: "event",
+            memory_text: "LOCAL FIXTURE legacy-corrected A_ONLY LOCAL-017",
+          },
+        }),
+      );
+      assert.equal(corrected.corrected, true);
+      assert.equal(
+        object(corrected.memory, "Missing corrected legacy memory")
+          .canon_status,
+        "draft",
+      );
+
+      const found = memories(
+        await client.tool("search_memories", {
+          query: "legacy-corrected",
+          canon_status: "draft",
+          memory_type: "event",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(found), ["LOCAL-017"]);
+      assert.equal(found.memories[0]?.memory_type, "event");
+      assert.ok(!("expected_at" in found.memories[0]));
+      assert.ok(!("canonization" in found.memories[0]));
+    },
+  );
+  await t.step(
     "OAuth owner can create one idempotent draft and promote only its own row",
     async () => {
       const issuedA = await authorize(
@@ -412,12 +508,12 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         title: "LOCAL WRITE project draft",
         memory_text:
           "LOCAL WRITE shared-write-marker A_ONLY project masih berjalan",
-        memory_type: "plan",
+        memory_type: "event",
         period: "masa_kini",
         event_year: 2026,
         category: "project",
         tags: ["local-integration", "write-test"],
-        expected_at: "2026-12-01T12:00:00+07:00",
+        occurred_at: "2026-11-23T12:00:00+07:00",
       };
 
       const created = jsonContent(await clientA.tool("create_memory", draft));
@@ -442,7 +538,7 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
           period: "masa_kini",
           event_year: 2026,
           canon_status: "draft",
-          memory_type: "plan",
+          memory_type: "event",
           limit: 20,
         }),
       );
@@ -505,6 +601,159 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         }),
       );
       assert.deepEqual(keys(draftSearch), []);
+
+      const correction = {
+        memory_key: memoryKey,
+        expected_title: draft.title,
+        confirmation: "KOREKSI MEMORI",
+        changes: {
+          memory_text:
+            "LOCAL WRITE corrected-write-marker A_ONLY project sudah selesai",
+        },
+      };
+      const missingCorrection = {
+        ...correction,
+        memory_key: "mem_00000000-0000-4000-8000-000000000000",
+      };
+      const foreignCorrection = await clientB.toolResult(
+        "correct_memory",
+        correction,
+      );
+      const absentCorrection = await clientB.toolResult(
+        "correct_memory",
+        missingCorrection,
+      );
+      assert.equal(foreignCorrection.isError, true);
+      assert.equal(absentCorrection.isError, true);
+      assert.equal(
+        contentText(foreignCorrection),
+        contentText(absentCorrection),
+        "Foreign and missing corrections must be indistinguishable",
+      );
+
+      const deletion = {
+        memory_key: memoryKey,
+        expected_title: draft.title,
+        confirmation: "HAPUS PERMANEN",
+      };
+      const missingDeletion = {
+        ...deletion,
+        memory_key: "mem_00000000-0000-4000-8000-000000000000",
+      };
+      const foreignDeletion = jsonContent(
+        await clientB.tool("delete_memory", deletion),
+      );
+      const absentDeletion = jsonContent(
+        await clientB.tool("delete_memory", missingDeletion),
+      );
+      assert.equal(foreignDeletion.deleted, false);
+      assert.equal(foreignDeletion.already_absent, true);
+      assert.deepEqual(
+        foreignDeletion,
+        absentDeletion,
+        "Foreign and missing deletions must be indistinguishable",
+      );
+
+      const stillCanon = memories(
+        await clientA.tool("search_memories", {
+          query: "shared-write-marker",
+          canon_status: "canon",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(stillCanon), [memoryKey]);
+
+      const corrected = jsonContent(
+        await clientA.tool("correct_memory", correction),
+      );
+      assert.equal(corrected.corrected, true);
+      const correctedMemory = object(
+        corrected.memory,
+        "Missing corrected memory",
+      );
+      assert.equal(correctedMemory.memory_key, memoryKey);
+      assert.equal(correctedMemory.title, draft.title);
+      assert.equal(correctedMemory.canon_status, "draft");
+
+      const oldText = memories(
+        await clientA.tool("search_memories", {
+          query: "shared-write-marker",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(oldText), []);
+      const correctedText = memories(
+        await clientA.tool("search_memories", {
+          query: "corrected-write-marker",
+          canon_status: "draft",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(correctedText), [memoryKey]);
+      assert.equal(
+        correctedText.memories[0]?.memory_text,
+        correction.changes.memory_text,
+      );
+      assert.equal(correctedText.memories[0]?.memory_type, "event");
+      assert.ok(!("expected_at" in correctedText.memories[0]));
+      assert.ok(!("canonization" in correctedText.memories[0]));
+
+      const directDeletion = await rest(
+        config,
+        issuedA.access_token,
+        `?memory_key=eq.${memoryKey}`,
+        { method: "DELETE" },
+      );
+      const directDeletionError = await jsonResponse(
+        directDeletion,
+        "Denied direct delete",
+      );
+      assert.equal(directDeletion.status, 403);
+      assert.equal(directDeletionError.code, "42501");
+
+      const unconfirmedDeletion = await rpc(
+        config,
+        issuedA.access_token,
+        "delete_charmaine_memory",
+        {
+          p_memory_key: memoryKey,
+          p_expected_title: draft.title,
+          p_confirmation: "tidak sah",
+        },
+      );
+      assert.equal(unconfirmedDeletion.status, 400);
+
+      const deleted = jsonContent(
+        await clientA.tool("delete_memory", deletion),
+      );
+      assert.equal(deleted.deleted, true);
+      assert.equal(deleted.already_absent, false);
+      const deletedMemory = object(deleted.memory, "Missing deleted memory");
+      assert.equal(deletedMemory.memory_key, memoryKey);
+      assert.equal(deletedMemory.title, draft.title);
+      assert.equal(deletedMemory.canon_status, "draft");
+
+      const deletedSearch = memories(
+        await clientA.tool("search_memories", {
+          query: "corrected-write-marker",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(deletedSearch), []);
+      const deletedRows = await rest(
+        config,
+        issuedA.access_token,
+        `?select=memory_key&memory_key=eq.${memoryKey}`,
+      );
+      assert.equal(deletedRows.status, 200);
+      assert.deepEqual(await deletedRows.json(), []);
+
+      const deletionReplay = jsonContent(
+        await clientA.tool("delete_memory", deletion),
+      );
+      assert.equal(deletionReplay.deleted, false);
+      assert.equal(deletionReplay.already_absent, true);
+      assert.deepEqual(deletionReplay, absentDeletion);
     },
   );
   await t.step(
@@ -520,6 +769,19 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         memory_text: "This must be rejected without an OAuth client_id.",
       });
       assert.equal(plainWrite.isError, true);
+      const plainCorrection = await plain.toolResult("correct_memory", {
+        memory_key: "mem_00000000-0000-4000-8000-000000000000",
+        expected_title: "Password-only correction",
+        confirmation: "KOREKSI MEMORI",
+        changes: { memory_text: "This must also be rejected." },
+      });
+      assert.equal(plainCorrection.isError, true);
+      const plainDeletion = await plain.toolResult("delete_memory", {
+        memory_key: "mem_00000000-0000-4000-8000-000000000000",
+        expected_title: "Password-only deletion",
+        confirmation: "HAPUS PERMANEN",
+      });
+      assert.equal(plainDeletion.isError, true);
 
       const a = await authorize(config, metadata, clientId, config.users.a);
       const hidden = await rest(

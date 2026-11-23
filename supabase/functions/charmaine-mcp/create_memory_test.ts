@@ -100,7 +100,7 @@ function input(overrides: Record<string, unknown> = {}) {
     idempotency_key: IDEMPOTENCY_KEY,
     title: "Project Charmaine dimulai",
     memory_text: "Kami mulai menyusun otak memori Charmaine.",
-    memory_type: "plan",
+    memory_type: "event",
     tags: ["project", "charmaine"],
     ...overrides,
   });
@@ -119,6 +119,8 @@ Deno.test("schema rejects ownership and canon overrides", () => {
   assert.throws(() => input({ canon_status: "canon" }));
   assert.throws(() => input({ importance: 6 }));
   assert.throws(() => input({ idempotency_key: "not-a-uuid" }));
+  assert.throws(() => input({ memory_type: "plan" }));
+  assert.throws(() => input({ expected_at: "2026-12-01T12:00:00+07:00" }));
   assert.throws(() => input({ details: { canonization: {} } }));
   assert.throws(() => input({ details: { request_hash: "caller-value" } }));
 });
@@ -137,7 +139,7 @@ Deno.test("create inserts an RLS-owned draft without owner input", async () => {
       fake.client,
       input({
         details: { note: "kept" },
-        expected_at: "2026-12-01T12:00:00+07:00",
+        occurred_at: "2026-11-23T12:00:00+07:00",
       }),
     ),
   );
@@ -153,7 +155,12 @@ Deno.test("create inserts an RLS-owned draft without owner input", async () => {
   assert.equal(row.perspective, "charmaine");
   assert.deepEqual(row.people, []);
   assert.equal((row.details as Record<string, unknown>).note, "kept");
-  assert.equal((row.details as Record<string, unknown>).memory_type, "plan");
+  assert.equal((row.details as Record<string, unknown>).memory_type, "event");
+  assert.equal(
+    (row.details as Record<string, unknown>).occurred_at,
+    "2026-11-23T12:00:00+07:00",
+  );
+  assert.ok(!("expected_at" in (row.details as Record<string, unknown>)));
   assert.equal(
     (row.details as Record<string, unknown>).idempotency_key,
     IDEMPOTENCY_KEY,

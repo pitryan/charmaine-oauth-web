@@ -8,7 +8,9 @@ import { withOAuthProtectedResource, withSupabase } from "@supabase/server";
 
 import { z } from "zod";
 
+import { correctMemory, correctMemorySchema } from "./correct_memory.ts";
 import { createMemory, createMemorySchema } from "./create_memory.ts";
+import { deleteMemory, deleteMemorySchema } from "./delete_memory.ts";
 import { listMemories, listMemoriesSchema } from "./list_memories.ts";
 import { presentMemory } from "./memory_output.ts";
 import { promoteMemory, promoteMemorySchema } from "./promote_memory.ts";
@@ -23,7 +25,7 @@ Deno.serve(
       const handler = createMcpHandler(() => {
         const server = new McpServer({
           name: "charmaine-mcp",
-          version: "0.3.0",
+          version: "0.4.0",
         });
 
         // Tool pertama: tes koneksi
@@ -126,9 +128,10 @@ Deno.serve(
         server.registerTool(
           "create_memory",
           {
-            description: "Simpan memori baru sebagai draft. Tool ini tidak " +
-              "dapat membuat canon atau menentukan owner; kepemilikan berasal " +
-              "dari sesi OAuth dan tetap dibatasi RLS.",
+            description: "Simpan ingatan autobiografis baru sebagai draft. " +
+              "Memori baru hanya berupa event, fact, atau state; rencana dan " +
+              "daftar tugas tidak disimpan sebagai memori jangka panjang. " +
+              "Tool ini tidak dapat menentukan owner atau membuat canon.",
             inputSchema: createMemorySchema,
             annotations: {
               readOnlyHint: false,
@@ -144,8 +147,9 @@ Deno.serve(
           {
             description:
               "Jadikan memori draft sebagai canon setelah pengguna " +
-              "mengonfirmasi bahwa fakta atau kejadian tersebut benar. Hanya " +
-              "memori milik sesi OAuth yang dapat dipromosikan.",
+              "mengonfirmasi bahwa event, fact, atau state tersebut benar. " +
+              "Draft plan lama tidak dapat dipromosikan. Hanya memori milik " +
+              "sesi OAuth yang dapat dipromosikan.",
             inputSchema: promoteMemorySchema,
             annotations: {
               readOnlyHint: false,
@@ -154,6 +158,40 @@ Deno.serve(
             },
           },
           (args) => promoteMemory(supabase, args),
+        );
+
+        server.registerTool(
+          "correct_memory",
+          {
+            description: "Koreksi isi memori milik pengguna secara permanen " +
+              "setelah target dan judulnya dikonfirmasi. Isi lama tidak " +
+              "disimpan sebagai revisi. Memori hasil koreksi selalu kembali " +
+              "menjadi draft agar dapat diperiksa sebelum dijadikan canon.",
+            inputSchema: correctMemorySchema,
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: true,
+              idempotentHint: false,
+            },
+          },
+          (args) => correctMemory(supabase, args),
+        );
+
+        server.registerTool(
+          "delete_memory",
+          {
+            description: "Hapus satu memori milik pengguna secara permanen. " +
+              "Tidak ada arsip, tombstone, atau salinan isi di tingkat " +
+              "aplikasi. Gunakan hanya setelah pengguna mengonfirmasi " +
+              "memory_key dan judul target secara eksplisit.",
+            inputSchema: deleteMemorySchema,
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: true,
+              idempotentHint: true,
+            },
+          },
+          (args) => deleteMemory(supabase, args),
         );
 
         return server;

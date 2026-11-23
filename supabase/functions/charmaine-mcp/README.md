@@ -1,8 +1,14 @@
 # Charmaine MCP
 
 Edge Function Deno untuk `ping`, `search_memories`, `list_memories`,
-`create_memory`, dan `promote_memory`. Website persetujuan OAuth tetap
-menggunakan Next.js di root repository.
+`create_memory`, `promote_memory`, `correct_memory`, dan `delete_memory`.
+Website persetujuan OAuth tetap menggunakan Next.js di root repository.
+
+Aturan tentang jenis memori, pemisahan fakta dari sudut pandang Syzeline,
+promosi canon, koreksi, dan penghapusan permanen berada di
+[Memory Contract v1](MEMORY_CONTRACT.md). Pembuatan baru hanya menerima `event`,
+`fact`, dan `state`. Nilai `plan` lama tetap dapat dibaca dan difilter untuk
+kompatibilitas, tetapi tidak diterima oleh `create_memory`.
 
 ## Filter `list_memories`
 
@@ -42,7 +48,8 @@ menaik. Respons JSON di dalam konten teks MCP mempertahankan:
 - `memories`: data hasil query, termasuk `canon_status` dan `clarity` asli.
 
 Metadata percakapan dari `details` disajikan sebagai `memory_type`,
-`expected_at`, `occurred_at`, dan `canonization`. Nilai internal seperti
+`expected_at`, `occurred_at`, dan `canonization`. `expected_at` tetap disajikan
+untuk kompatibilitas memori lama bertipe `plan`. Nilai internal seperti
 `idempotency_key` dan `request_hash` tidak pernah dikembalikan oleh tool baca.
 
 ## Pengujian lokal
@@ -71,7 +78,8 @@ dari direktori fungsi, lalu tinjau perubahan lockfile:
 
 ```sh
 deno check --frozen=false index.ts list_memories_test.ts \
-  memory_output_test.ts create_memory_test.ts promote_memory_test.ts
+  memory_output_test.ts create_memory_test.ts promote_memory_test.ts \
+  correct_memory_test.ts delete_memory_test.ts
 ```
 
 `vercel.json` di root menonaktifkan deployment website otomatis. Workflow
@@ -79,8 +87,10 @@ deno check --frozen=false index.ts list_memories_test.ts \
 `main` juga memicu `deploy-charmaine-mcp.yml`, yang menguji lalu men-deploy Edge
 Function produksi. Migration SQL tidak diterapkan oleh workflow tersebut dan
 harus ditinjau serta diterapkan **sebelum** perubahan fungsi digabungkan atau
-dipush ke `main`. Jika urutannya terbalik, tool tulis dapat terlihat tetapi akan
-gagal karena grant dan policy produksinya belum tersedia.
+dipush ke `main`. Migration menambahkan RPC terbatas untuk koreksi dan hard
+delete tanpa memberikan hak `DELETE` tabel secara langsung. Jika urutannya
+terbalik, tool tulis dapat terlihat tetapi akan gagal karena RPC produksinya
+belum tersedia.
 
 ## Kesesuaian konteks proyek
 
@@ -105,10 +115,12 @@ menjadi referensi tujuan dan batas proyek. Saat dibandingkan dengan source pada
 
 ## Verifikasi lanjutan setelah persetujuan terpisah
 
-Suite integrasi lokal menggunakan schema sintetis, dua akun OAuth, dan kelima
-tool MCP. Suite menguji pembuatan draft idempotent, promosi milik sendiri,
-penolakan akses silang akun, token tanpa `client_id`, serta pembatasan hasil dan
-`total`. Deployment dan penerapan migration produksi tetap langkah terpisah.
+Suite integrasi lokal menggunakan schema sintetis, dua akun OAuth, dan ketujuh
+tool MCP. Suite menguji pembuatan draft idempotent, promosi dan koreksi milik
+sendiri, hard delete tanpa tombstone, penolakan akses silang akun, token tanpa
+`client_id`, serta pembatasan hasil dan `total`. Pengujian delete membaca ulang
+target untuk memastikan row sudah tidak tersedia. Deployment dan penerapan
+migration produksi tetap langkah terpisah.
 
 Jika endpoint uji sudah menjalankan revisi PR, gunakan contoh berikut melalui
 klien MCP/ChatGPT. Angka di bawah hanya berlaku bila dataset uji meniru
@@ -136,10 +148,18 @@ rollback runtime dan policy database harus dilakukan terpisah.
 
 `index.ts` tetap memasang `withOAuthProtectedResource()` diikuti
 `withSupabase({ auth: "user" })`. Semua modul menerima klien pengguna dari
-request yang sama, sehingga baca dan tulis tetap tunduk pada RLS. Tidak ada
-klien admin. `create_memory` tidak menerima `owner_id` atau `canon_status` dan
-selalu memakai default database `draft`; `promote_memory` hanya melakukan
-transisi milik pengguna dari `draft` ke `canon`.
+request yang sama dan tidak membuat klien admin. Baca, pembuatan, dan promosi
+tetap tunduk pada RLS. RPC `SECURITY DEFINER` untuk koreksi dan penghapusan
+memeriksa ulang `auth.uid()`, OAuth `client_id`, pemilik record, serta judul
+target tanpa memperluas privilege tabel langsung. `create_memory` tidak menerima
+`owner_id` atau `canon_status` dan selalu memakai default database `draft`;
+`promote_memory` hanya melakukan transisi milik pengguna dari `draft` ke
+`canon`. `correct_memory` mengganti field yang diminta dan selalu mengembalikan
+hasilnya ke `draft` untuk konfirmasi ulang. `delete_memory` melakukan hard
+delete; tidak ada tombstone, arsip, atau salinan isi di tingkat aplikasi.
+Keduanya memakai respons generik untuk target yang tidak ada atau bukan milik
+pengguna agar tidak membocorkan keberadaan data lintas pemilik. Backup, WAL, dan
+log yang dikelola penyedia tetap mengikuti kebijakan retensi Supabase.
 
 Aturan gaya bicara dan autobiografi karakter berada di luar lapisan
 penyimpanan/pencarian ini. Persona sebaiknya disimpan dalam instruksi agent,

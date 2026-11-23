@@ -34,8 +34,7 @@ export const createMemorySchema = z.object({
   emotion: optionalText(120),
   clarity: shortText.default("clear"),
   importance: z.number().int().min(1).max(5).default(3),
-  memory_type: z.enum(["event", "fact", "plan", "state"]).default("event"),
-  expected_at: z.string().datetime({ offset: true }).nullable().optional(),
+  memory_type: z.enum(["event", "fact", "state"]).default("event"),
   occurred_at: z.string().datetime({ offset: true }).nullable().optional(),
   details: memoryDetails.default({}),
 }).strict();
@@ -164,7 +163,6 @@ export async function createMemory(
   const {
     idempotency_key,
     memory_type,
-    expected_at,
     occurred_at,
     details,
     ...fields
@@ -176,7 +174,6 @@ export async function createMemory(
     details: {
       ...details,
       memory_type,
-      expected_at: expected_at ?? null,
       occurred_at: occurred_at ?? null,
       idempotency_key,
       request_hash: hash,
