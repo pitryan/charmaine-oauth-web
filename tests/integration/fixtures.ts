@@ -33,7 +33,12 @@ export type SyntheticMemory = {
   origin: "synthetic_local_integration";
   canon_status: "draft" | "canon" | "archived" | "au";
   importance: number;
-  details: { synthetic: true; fixture_owner: "A" | "B" };
+  details: {
+    synthetic: true;
+    fixture_owner: "A" | "B";
+    memory_type?: "plan";
+    expected_at?: string;
+  };
   created_at: string;
 };
 
@@ -62,7 +67,14 @@ export function makeMemories(
       origin: "synthetic_local_integration",
       canon_status,
       importance: 1,
-      details: { synthetic: true, fixture_owner: owner },
+      details: suffix === "017"
+        ? {
+          synthetic: true,
+          fixture_owner: owner,
+          memory_type: "plan",
+          expected_at: "2030-01-01T09:00:00+07:00",
+        }
+        : { synthetic: true, fixture_owner: owner },
       created_at: `2020-01-01T00:00:${
         String(Number(suffix)).padStart(2, "0")
       }.000Z`,

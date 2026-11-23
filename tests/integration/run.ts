@@ -139,7 +139,9 @@ async function writeProject(workdir: string, projectId: string) {
     const file of [
       "index.ts",
       "categories.ts",
+      "correct_memory.ts",
       "create_memory.ts",
+      "delete_memory.ts",
       "list_memories.ts",
       "memory_output.ts",
       "promote_memory.ts",

@@ -96,6 +96,9 @@ export async function promoteMemory(
   }
 
   if (!existing.data) return unavailableResult();
+  if (plainObject(existing.data.details).memory_type === "plan") {
+    return unavailableResult();
+  }
   if (existing.data.canon_status === "canon") {
     return success(existing.data, false);
   }
