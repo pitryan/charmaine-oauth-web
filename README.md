@@ -3,6 +3,11 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 Pengujian Charmaine MCP: [unit test Deno](supabase/functions/charmaine-mcp/README.md)
 dan [integrasi OAuth/RLS lokal dengan dua akun sintetis](tests/integration/README.md).
 
+Perubahan pada branch fitur menambahkan pembacaan memori, pembuatan memori
+`draft`, dan promosi draft menjadi `canon`. Fitur tulis baru tersedia setelah
+policy produksi di `supabase/migrations/` diterapkan dan Edge Function terkait
+di-deploy; migration tidak diterapkan otomatis oleh deployment fungsi.
+
 ## Getting Started
 
 First, run the development server:

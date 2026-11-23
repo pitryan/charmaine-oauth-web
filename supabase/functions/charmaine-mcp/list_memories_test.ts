@@ -69,13 +69,13 @@ const rows: Row[] = [
 ];
 
 class FakeQuery implements PromiseLike<Result> {
-  filters: [string, string][] = [];
+  filters: [string, string | number][] = [];
   ordering?: { column: string; ascending: boolean };
   bounds?: [number, number];
 
   constructor(private source: Row[], private override?: Result) {}
 
-  eq(column: string, value: string) {
+  eq(column: string, value: string | number) {
     this.filters.push([column, value]);
     return this;
   }
@@ -92,7 +92,13 @@ class FakeQuery implements PromiseLike<Result> {
     reject?: ((reason: unknown) => U | PromiseLike<U>) | null,
   ): Promise<T | U> {
     const filtered = this.source.filter((row) =>
-      this.filters.every(([column, value]) => row[column] === value)
+      this.filters.every(([column, value]) => {
+        if (column === "details->>memory_type") {
+          const details = row.details as Record<string, unknown> | undefined;
+          return details?.memory_type === value;
+        }
+        return row[column] === value;
+      })
     );
     const order = this.ordering;
     if (order) {
@@ -237,7 +243,8 @@ Deno.test("omitted filters retain projection, exact count, order, and defaults",
   assert.deepEqual(f.calls, {
     table: "charmaine_memories",
     columns:
-      "memory_key,title,memory_text,school_year,category,canon_status,clarity",
+      "memory_key,title,memory_text,period,school_year,event_year,category," +
+      "people,tags,emotion,canon_status,clarity,importance,created_at,details",
     count: "exact",
   });
   assert.deepEqual(f.query.filters, []);
@@ -274,6 +281,47 @@ Deno.test("year-only filter preserves draft and canon statuses", async () => {
   ]);
   assert.equal(result.count, 4);
   assert.equal(result.total, 4);
+});
+
+Deno.test("general-life filters do not depend on school year", async () => {
+  const source: Row[] = [
+    {
+      ...rows[0],
+      memory_key: "current-project",
+      school_year: "",
+      period: "masa_kini",
+      event_year: 2026,
+      canon_status: "draft",
+      details: { memory_type: "plan" },
+    },
+    {
+      ...rows[1],
+      memory_key: "past-project",
+      school_year: "",
+      period: "masa_kini",
+      event_year: 2025,
+      canon_status: "canon",
+      details: { memory_type: "event" },
+    },
+  ];
+  const f = fixture(source);
+  const result = payload(
+    await f.run({
+      period: "masa_kini",
+      event_year: 2026,
+      canon_status: "draft",
+      memory_type: "plan",
+    }),
+  );
+  assert.deepEqual(f.query.filters, [
+    ["period", "masa_kini"],
+    ["event_year", 2026],
+    ["canon_status", "draft"],
+    ["details->>memory_type", "plan"],
+  ]);
+  assert.deepEqual(result.memories.map((row) => row.memory_key), [
+    "current-project",
+  ]);
 });
 
 Deno.test("combined filters count all matches before applying pagination", async () => {
@@ -401,6 +449,12 @@ Deno.test("schema retains defaults and rejects invalid pagination/filter types",
       { offset: NaN },
       { school_year: 2009 },
       { category: 1 },
+      { period: "   " },
+      { event_year: 0 },
+      { event_year: 10_000 },
+      { event_year: "2026" },
+      { canon_status: "archived" },
+      { memory_type: "reflection" },
     ]
   ) assert.throws(() => listMemoriesSchema.parse(args));
 });

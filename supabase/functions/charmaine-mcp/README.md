@@ -1,7 +1,8 @@
 # Charmaine MCP
 
-Edge Function Deno untuk `ping`, `search_memories`, dan `list_memories`. Website
-persetujuan OAuth tetap menggunakan Next.js di root repository.
+Edge Function Deno untuk `ping`, `search_memories`, `list_memories`,
+`create_memory`, dan `promote_memory`. Website persetujuan OAuth tetap
+menggunakan Next.js di root repository.
 
 ## Filter `list_memories`
 
@@ -27,16 +28,22 @@ Tambahkan kategori/alias periode berikutnya ke `CATEGORY_ALIASES` di
 ditolak saat modul dimuat. Pemetaan tidak bergantung pada tahun ajaran atau
 jumlah memori dan tidak mengubah data tersimpan.
 
-`school_year` tetap merupakan filter persis, misalnya `2009/2010`. Jika kedua
-filter diberikan, keduanya harus cocok. `limit` bernilai 1–20 (default 10), dan
-`offset` merupakan bilangan bulat nonnegatif (default 0). Urutan tetap
-`memory_key` menaik. Respons JSON di dalam konten teks MCP mempertahankan:
+`school_year`, `period`, `event_year`, `category`, `memory_type`, dan
+`canon_status` merupakan filter opsional yang dapat digabungkan. Status yang
+ditawarkan tool saat ini hanya `draft` dan `canon`; nilai editorial lama tetap
+dipertahankan di database. `limit` bernilai 1–20 (default 10), dan `offset`
+merupakan bilangan bulat nonnegatif (default 0). Urutan tetap `memory_key`
+menaik. Respons JSON di dalam konten teks MCP mempertahankan:
 
 - `count`: jumlah memori pada halaman ini.
 - `total`: jumlah seluruh memori yang cocok dengan filter dan diizinkan RLS,
   sebelum pagination.
 - `offset`: posisi awal halaman.
 - `memories`: data hasil query, termasuk `canon_status` dan `clarity` asli.
+
+Metadata percakapan dari `details` disajikan sebagai `memory_type`,
+`expected_at`, `occurred_at`, dan `canonization`. Nilai internal seperti
+`idempotency_key` dan `request_hash` tidak pernah dikembalikan oleh tool baca.
 
 ## Pengujian lokal
 
@@ -63,16 +70,17 @@ validasi. Untuk pembaruan dependency yang disengaja, jalankan perintah berikut
 dari direktori fungsi, lalu tinjau perubahan lockfile:
 
 ```sh
-deno check --frozen=false index.ts list_memories_test.ts
+deno check --frozen=false index.ts list_memories_test.ts \
+  memory_output_test.ts create_memory_test.ts promote_memory_test.ts
 ```
 
-`vercel.json` di root menonaktifkan deployment otomatis untuk `main` dan branch
-review `codex/list-memories-category-aliases`, sesuai
-[konfigurasi Git Vercel](https://vercel.com/docs/project-configuration/git-configuration).
-Blokir `main` harus tetap ada saat merge agar perubahan GitHub tidak memicu
-deployment website. Pengaktifan kembali deployment Vercel dan deployment manual
-Edge Function Supabase merupakan langkah terpisah setelah persetujuan pengguna.
-Workflow MCP hanya menjalankan pemeriksaan dan tidak melakukan deployment.
+`vercel.json` di root menonaktifkan deployment website otomatis. Workflow
+`charmaine-mcp.yml` memeriksa fungsi pada Pull Request. Push perubahan fungsi ke
+`main` juga memicu `deploy-charmaine-mcp.yml`, yang menguji lalu men-deploy Edge
+Function produksi. Migration SQL tidak diterapkan oleh workflow tersebut dan
+harus ditinjau serta diterapkan **sebelum** perubahan fungsi digabungkan atau
+dipush ke `main`. Jika urutannya terbalik, tool tulis dapat terlihat tetapi akan
+gagal karena grant dan policy produksinya belum tersedia.
 
 ## Kesesuaian konteks proyek
 
@@ -84,25 +92,23 @@ menjadi referensi tujuan dan batas proyek. Saat dibandingkan dengan source pada
   `18f0d483`. Branch PR #1 menambahkan normalisasi alias sebelum filter `.eq`
   yang sama. Status "IN PROGRESS" dalam dokumen mencakup pengerjaan yang kini
   siap ditinjau; bukan bukti bahwa kode PR sudah aktif di endpoint produksi.
-- `search_memories` tetap mencari substring pada `memory_text` saja. Pencarian
-  judul, tokoh, tags, semantic retrieval, dan tool editorial tetap roadmap.
+- `search_memories` tetap mencari substring pada `memory_text` saja, tetapi
+  dapat difilter ke `draft` atau `canon`. Pencarian judul, tokoh, tags, dan
+  semantic retrieval tetap roadmap.
 - Dokumen menyatakan 73 memori kelas 1 seluruhnya `draft`. Fixture tes dengan
   status campuran dan tahun lain adalah data sintetis untuk menguji perilaku,
   bukan salinan atau laporan isi database. Pengujian mempertahankan keempat
   status `draft`, `canon`, `archived`, `au`, serta `clarity: unspecified`.
-- Detail schema, `owner_id = auth.uid()`, dan syarat klaim OAuth `client_id`
-  dilaporkan oleh dokumen. Repository belum memiliki migration/policy/seed untuk
-  memverifikasi atau mereproduksi keadaan database itu. PR ini tidak mengubah
-  maupun mengaudit ulang kebijakan produksi.
+- Schema produksi dan policy baca diverifikasi kembali pada 2026-11-23 sebelum
+  migration write disusun. Repository menyimpan migration write yang tetap harus
+  diterapkan secara manual; fixture integrasi tetap bukan salinan data produksi.
 
 ## Verifikasi lanjutan setelah persetujuan terpisah
 
-Langkah berikutnya adalah review PR, lalu menyiapkan pengujian integrasi lokal
-atau staging dengan schema dan RLS yang telah diperiksa, data sintetis, serta
-dua akun uji. Uji OAuth login, approve/deny consent, token tidak
-valid/kedaluwarsa, ketiga tool MCP, serta pembatasan hasil dan `total` untuk
-masing-masing pengguna. Persiapan lingkungan dan deployment bukan bagian dari PR
-alias ini.
+Suite integrasi lokal menggunakan schema sintetis, dua akun OAuth, dan kelima
+tool MCP. Suite menguji pembuatan draft idempotent, promosi milik sendiri,
+penolakan akses silang akun, token tanpa `client_id`, serta pembatasan hasil dan
+`total`. Deployment dan penerapan migration produksi tetap langkah terpisah.
 
 Jika endpoint uji sudah menjalankan revisi PR, gunakan contoh berikut melalui
 klien MCP/ChatGPT. Angka di bawah hanya berlaku bila dataset uji meniru
@@ -123,22 +129,22 @@ keadaan produksi dari hasil fixture atau dari angka dalam dokumen konteks.
 
 Sebelum merge, rollback cukup dengan menutup PR tanpa menerapkannya. Jika
 perubahan source sudah digabungkan, gunakan revert commit melalui PR terpisah.
-Revert GitHub tidak otomatis mengembalikan revisi Edge Function; rollback
-runtime setelah deployment memerlukan persetujuan terpisah. Tidak ada
-migrasi/data yang perlu di-rollback dalam perubahan ini.
+Revert GitHub tidak otomatis mengembalikan revisi Edge Function atau migration;
+rollback runtime dan policy database harus dilakukan terpisah.
 
 ## Batas arsitektur
 
 `index.ts` tetap memasang `withOAuthProtectedResource()` diikuti
-`withSupabase({ auth: "user" })`. Modul daftar menerima klien pengguna dari
-request yang sama, sehingga query dan total tetap tunduk pada RLS. Tidak ada
-klien admin, operasi tulis database, atau perubahan status `draft` menjadi
-`canon`.
+`withSupabase({ auth: "user" })`. Semua modul menerima klien pengguna dari
+request yang sama, sehingga baca dan tulis tetap tunduk pada RLS. Tidak ada
+klien admin. `create_memory` tidak menerima `owner_id` atau `canon_status` dan
+selalu memakai default database `draft`; `promote_memory` hanya melakukan
+transisi milik pengguna dari `draft` ke `canon`.
 
-`categories.ts` menangani kosakata pencarian dan `list_memories.ts` menangani
-schema, query baca, serta format respons. Aturan gaya bicara dan autobiografi
-karakter berada di luar lapisan penyimpanan/pencarian ini. Pengujian lokal tidak
-mengklaim memverifikasi kebijakan RLS atau autentikasi pada deployment produksi.
+Aturan gaya bicara dan autobiografi karakter berada di luar lapisan
+penyimpanan/pencarian ini. Persona sebaiknya disimpan dalam instruksi agent,
+sedangkan MCP hanya menyimpan dan mengambil data memori. Pengujian lokal tidak
+mengklaim memverifikasi deployment produksi.
 
 Konfigurasi per fungsi mengikuti
 [panduan dependency Supabase](https://supabase.com/docs/guides/functions/dependencies)
