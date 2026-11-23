@@ -93,9 +93,12 @@ class McpClient {
     );
   }
   async tool(name: string, args: Json = {}): Promise<Json> {
-    const result = await this.request("tools/call", { name, arguments: args });
+    const result = await this.toolResult(name, args);
     assert.ok(!result.isError, `${name} must not return a tool error`);
     return result;
+  }
+  async toolResult(name: string, args: Json = {}): Promise<Json> {
+    return await this.request("tools/call", { name, arguments: args });
   }
 }
 function contentText(result: Json): string {
@@ -106,6 +109,15 @@ function contentText(result: Json): string {
   const block = object(result.content[0], "Expected MCP content block");
   assert.equal(block.type, "text");
   return textField(block.text, "Expected MCP text");
+}
+function jsonContent(result: Json): Json {
+  let value: unknown;
+  try {
+    value = JSON.parse(contentText(result));
+  } catch {
+    throw new Error("MCP tool returned invalid JSON content");
+  }
+  return object(value, "Expected MCP JSON object");
 }
 interface MemoryResult {
   count: number;
@@ -265,7 +277,13 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         assert.ok(Array.isArray(listed.tools));
         assert.deepEqual(
           listed.tools.map((tool) => object(tool, "Expected tool").name).sort(),
-          ["list_memories", "ping", "search_memories"],
+          [
+            "create_memory",
+            "list_memories",
+            "ping",
+            "promote_memory",
+            "search_memories",
+          ],
         );
         assert.equal(
           contentText(await client.tool("ping")),
@@ -370,12 +388,139 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
     },
   );
   await t.step(
-    "password-only sessions cannot read memories and OAuth cannot write",
+    "OAuth owner can create one idempotent draft and promote only its own row",
+    async () => {
+      const issuedA = await authorize(
+        config,
+        metadata,
+        clientId,
+        config.users.a,
+      );
+      const issuedB = await authorize(
+        config,
+        metadata,
+        clientId,
+        config.users.b,
+      );
+      const clientA = new McpClient(config, issuedA.access_token);
+      const clientB = new McpClient(config, issuedB.access_token);
+      await clientA.initialize();
+      await clientB.initialize();
+
+      const draft = {
+        idempotency_key: "11111111-1111-4111-8111-111111111111",
+        title: "LOCAL WRITE project draft",
+        memory_text:
+          "LOCAL WRITE shared-write-marker A_ONLY project masih berjalan",
+        memory_type: "plan",
+        period: "masa_kini",
+        event_year: 2026,
+        category: "project",
+        tags: ["local-integration", "write-test"],
+        expected_at: "2026-12-01T12:00:00+07:00",
+      };
+
+      const created = jsonContent(await clientA.tool("create_memory", draft));
+      assert.equal(created.replayed, false);
+      const createdMemory = object(created.memory, "Missing created memory");
+      const memoryKey = textField(
+        createdMemory.memory_key,
+        "Missing created memory key",
+      );
+      assert.match(memoryKey, /^mem_[0-9a-f-]{36}$/);
+      assert.equal(createdMemory.canon_status, "draft");
+
+      const replayed = jsonContent(await clientA.tool("create_memory", draft));
+      assert.equal(replayed.replayed, true);
+      assert.equal(
+        object(replayed.memory, "Missing replay memory").memory_key,
+        memoryKey,
+      );
+
+      const listedA = memories(
+        await clientA.tool("list_memories", {
+          period: "masa_kini",
+          event_year: 2026,
+          canon_status: "draft",
+          memory_type: "plan",
+          limit: 20,
+        }),
+      );
+      assert.deepEqual(keys(listedA), [memoryKey]);
+      assert.equal(listedA.total, 1);
+
+      const foundA = memories(
+        await clientA.tool("search_memories", {
+          query: "shared-write-marker",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(foundA), [memoryKey]);
+      const foundB = memories(
+        await clientB.tool("search_memories", {
+          query: "shared-write-marker",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(foundB), []);
+
+      const foreignPromotion = await clientB.toolResult("promote_memory", {
+        memory_key: memoryKey,
+      });
+      assert.equal(foreignPromotion.isError, true);
+      assert.match(contentText(foreignPromotion), /tidak ditemukan/i);
+
+      const promoted = jsonContent(
+        await clientA.tool("promote_memory", {
+          memory_key: memoryKey,
+          occurred_at: "2026-11-23T12:00:00+07:00",
+          note: "Project selesai dan sudah dikonfirmasi.",
+        }),
+      );
+      assert.equal(promoted.promoted, true);
+      assert.equal(
+        object(promoted.memory, "Missing promoted memory").canon_status,
+        "canon",
+      );
+
+      const promotionReplay = jsonContent(
+        await clientA.tool("promote_memory", { memory_key: memoryKey }),
+      );
+      assert.equal(promotionReplay.promoted, false);
+      assert.equal(promotionReplay.already_canon, true);
+
+      const canonSearch = memories(
+        await clientA.tool("search_memories", {
+          query: "shared-write-marker",
+          canon_status: "canon",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(canonSearch), [memoryKey]);
+      const draftSearch = memories(
+        await clientA.tool("search_memories", {
+          query: "shared-write-marker",
+          canon_status: "draft",
+          limit: 10,
+        }),
+      );
+      assert.deepEqual(keys(draftSearch), []);
+    },
+  );
+  await t.step(
+    "password-only sessions cannot write and OAuth writes remain owner-scoped",
     async () => {
       const login = await passwordLogin(config, config.users.a);
       const plain = new McpClient(config, login);
       await plain.initialize();
       await expectList(plain, {}, []);
+      const plainWrite = await plain.toolResult("create_memory", {
+        idempotency_key: "22222222-2222-4222-8222-222222222222",
+        title: "Password-only write",
+        memory_text: "This must be rejected without an OAuth client_id.",
+      });
+      assert.equal(plainWrite.isError, true);
+
       const a = await authorize(config, metadata, clientId, config.users.a);
       const hidden = await rest(
         config,
@@ -394,7 +539,6 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
           memory_text: "LOCAL FIXTURE forbidden write",
           school_year: "2009/2010",
           category: "sekolah_dan_kelas",
-          canon_status: "draft",
         }),
       });
       const insertError = await jsonResponse(attempted, "Denied insert");
@@ -406,7 +550,7 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
       const changed = await rest(
         config,
         a.access_token,
-        "?memory_key=eq.LOCAL-002",
+        "?memory_key=eq.LOCAL-001",
         {
           method: "PATCH",
           body: JSON.stringify({ memory_text: "forbidden replacement" }),
@@ -418,6 +562,22 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         updateError.code === "42501",
         "Update must be denied by database privileges/RLS",
       );
+
+      const foreignPromotion = await rest(
+        config,
+        a.access_token,
+        "?memory_key=eq.LOCAL-002",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            canon_status: "canon",
+            details: { attempted_by_foreign_owner: true },
+          }),
+        },
+      );
+      assert.equal(foreignPromotion.status, 200);
+      assert.deepEqual(await foreignPromotion.json(), []);
+
       const b = await authorize(config, metadata, clientId, config.users.b);
       const clientB = new McpClient(config, b.access_token);
       await clientB.initialize();
@@ -432,6 +592,11 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
           row.memory_text.includes("B_ONLY")
         ),
         "Forbidden writes must leave the other user's rows unchanged",
+      );
+      assert.equal(
+        unchanged.memories.find((row) => row.memory_key === "LOCAL-002")
+          ?.canon_status,
+        "draft",
       );
     },
   );

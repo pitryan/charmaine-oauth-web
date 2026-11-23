@@ -139,7 +139,10 @@ async function writeProject(workdir: string, projectId: string) {
     const file of [
       "index.ts",
       "categories.ts",
+      "create_memory.ts",
       "list_memories.ts",
+      "memory_output.ts",
+      "promote_memory.ts",
       "deno.json",
       "deno.lock",
     ]

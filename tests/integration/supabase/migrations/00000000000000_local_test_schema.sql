@@ -11,19 +11,19 @@ create table public.charmaine_memories (
   memory_text text not null,
   perspective text not null default 'charmaine',
   period text,
-  school_year text not null,
-  event_year integer,
-  category text not null,
+  school_year text,
+  event_year smallint,
+  category text not null default 'slice_of_life',
   people text[] not null default '{}',
   tags text[] not null default '{}',
   emotion text,
-  clarity text not null default 'unspecified',
-  origin text not null default 'synthetic_local_integration',
+  clarity text not null default 'clear',
+  origin text not null default 'original_fiction',
   canon_status text not null default 'draft'
     check (canon_status in ('draft', 'canon', 'archived', 'au')),
-  importance integer not null default 1
+  importance smallint not null default 3
     check (importance between 1 and 5),
-  details jsonb not null default '{"synthetic":true}'::jsonb,
+  details jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -38,7 +38,36 @@ alter table public.charmaine_memories force row level security;
 
 revoke all on table public.charmaine_memories
   from public, anon, authenticated;
+revoke insert (
+  id, memory_key, owner_id, title, memory_text, perspective, period,
+  school_year, event_year, category, people, tags, emotion, clarity, origin,
+  canon_status, importance, details, created_at
+) on public.charmaine_memories from authenticated;
+revoke update (
+  id, memory_key, owner_id, title, memory_text, perspective, period,
+  school_year, event_year, category, people, tags, emotion, clarity, origin,
+  canon_status, importance, details, created_at
+) on public.charmaine_memories from authenticated;
 grant select on table public.charmaine_memories to authenticated;
+grant insert (
+  memory_key,
+  title,
+  memory_text,
+  perspective,
+  period,
+  school_year,
+  event_year,
+  category,
+  people,
+  tags,
+  emotion,
+  clarity,
+  origin,
+  importance,
+  details
+) on public.charmaine_memories to authenticated;
+grant update (canon_status, details)
+  on public.charmaine_memories to authenticated;
 
 -- The local runner uses these privileges only to bootstrap synthetic fixtures.
 -- Retrieval tests and the MCP runtime receive authenticated user tokens instead.
@@ -53,3 +82,35 @@ create policy local_owner_oauth_read
     owner_id = (select auth.uid())
     and nullif((select auth.jwt() ->> 'client_id'), '') is not null
   );
+
+create policy local_owner_oauth_insert
+  on public.charmaine_memories
+  for insert
+  to authenticated
+  with check (
+    owner_id = (select auth.uid())
+    and nullif((select auth.jwt() ->> 'client_id'), '') is not null
+    and canon_status = 'draft'
+  );
+
+create policy local_owner_oauth_promote
+  on public.charmaine_memories
+  for update
+  to authenticated
+  using (
+    owner_id = (select auth.uid())
+    and nullif((select auth.jwt() ->> 'client_id'), '') is not null
+    and canon_status = 'draft'
+  )
+  with check (
+    owner_id = (select auth.uid())
+    and nullif((select auth.jwt() ->> 'client_id'), '') is not null
+    and canon_status = 'canon'
+  );
+
+create unique index charmaine_memories_owner_idempotency_key_uidx
+  on public.charmaine_memories (
+    owner_id,
+    ((details ->> 'idempotency_key'))
+  )
+  where nullif(details ->> 'idempotency_key', '') is not null;

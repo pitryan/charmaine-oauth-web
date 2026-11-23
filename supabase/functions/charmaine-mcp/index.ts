@@ -8,7 +8,10 @@ import { withOAuthProtectedResource, withSupabase } from "@supabase/server";
 
 import { z } from "zod";
 
+import { createMemory, createMemorySchema } from "./create_memory.ts";
 import { listMemories, listMemoriesSchema } from "./list_memories.ts";
+import { presentMemory } from "./memory_output.ts";
+import { promoteMemory, promoteMemorySchema } from "./promote_memory.ts";
 
 Deno.serve(
   pipeline(
@@ -20,7 +23,7 @@ Deno.serve(
       const handler = createMcpHandler(() => {
         const server = new McpServer({
           name: "charmaine-mcp",
-          version: "0.2.0",
+          version: "0.3.0",
         });
 
         // Tool pertama: tes koneksi
@@ -47,26 +50,39 @@ Deno.serve(
           {
             description: "Cari ingatan Charmaine berdasarkan isi cerita. " +
               "Hanya membaca memori yang diizinkan RLS. " +
-              "Status draft atau canon tetap dipertahankan.",
+              "Bisa dibatasi ke draft atau canon; status selalu dipertahankan.",
             inputSchema: z.object({
               query: z.string().trim().min(2).max(100),
+              canon_status: z.enum(["draft", "canon"]).optional(),
+              memory_type: z.enum(["event", "fact", "plan", "state"])
+                .optional(),
               limit: z.number().int().min(1).max(10).default(5),
             }),
             annotations: { readOnlyHint: true },
           },
-          async ({ query, limit }) => {
+          async ({ query, canon_status, memory_type, limit }) => {
             // Menggunakan client OAuth milik pengguna.
             // RLS tetap berlaku.
-            const { data, error } = await supabase
+            let search = supabase
               .from("charmaine_memories")
               .select(
                 "memory_key,title,memory_text,period," +
                   "school_year,event_year,category,origin," +
-                  "canon_status,clarity",
+                  "canon_status,clarity,details",
               )
               .ilike("memory_text", `%${query}%`)
               .order("created_at", { ascending: false })
               .limit(limit);
+
+            if (canon_status) {
+              search = search.eq("canon_status", canon_status);
+            }
+
+            if (memory_type) {
+              search = search.eq("details->>memory_type", memory_type);
+            }
+
+            const { data, error } = await search;
 
             if (error) {
               return {
@@ -86,7 +102,7 @@ Deno.serve(
                   type: "text",
                   text: JSON.stringify({
                     count: data?.length ?? 0,
-                    memories: data ?? [],
+                    memories: (data ?? []).map((row) => presentMemory(row)),
                   }),
                 },
               ],
@@ -97,15 +113,47 @@ Deno.serve(
         server.registerTool(
           "list_memories",
           {
-            description:
-              "Ambil daftar ingatan Charmaine berdasarkan tahun ajaran " +
-              "atau kategori baku/alias sehari-hari. " +
-              "Cocok untuk mengenang masa sekolah. Hanya membaca memori " +
-              "yang diizinkan RLS; total mengikuti filter sebelum pagination.",
+            description: "Ambil daftar ingatan Charmaine berdasarkan status, " +
+              "periode hidup, tahun kejadian, kategori, atau tahun ajaran. " +
+              "Hanya membaca memori yang diizinkan RLS; total mengikuti " +
+              "filter sebelum pagination.",
             inputSchema: listMemoriesSchema,
             annotations: { readOnlyHint: true },
           },
           (args) => listMemories(supabase, args),
+        );
+
+        server.registerTool(
+          "create_memory",
+          {
+            description: "Simpan memori baru sebagai draft. Tool ini tidak " +
+              "dapat membuat canon atau menentukan owner; kepemilikan berasal " +
+              "dari sesi OAuth dan tetap dibatasi RLS.",
+            inputSchema: createMemorySchema,
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: false,
+              idempotentHint: true,
+            },
+          },
+          (args) => createMemory(supabase, args),
+        );
+
+        server.registerTool(
+          "promote_memory",
+          {
+            description:
+              "Jadikan memori draft sebagai canon setelah pengguna " +
+              "mengonfirmasi bahwa fakta atau kejadian tersebut benar. Hanya " +
+              "memori milik sesi OAuth yang dapat dipromosikan.",
+            inputSchema: promoteMemorySchema,
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: false,
+              idempotentHint: true,
+            },
+          },
+          (args) => promoteMemory(supabase, args),
         );
 
         return server;

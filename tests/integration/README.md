@@ -96,18 +96,22 @@ Key berselang antarpemilik. Pada limit 2, halaman A dimulai `001,003`, lalu
 `B_ONLY` menguji kebocoran `search_memories`. Ketujuh kategori dan keempat
 status editorial disertakan; metadata harus tetap seperti fixture.
 
-Model RLS memberi `authenticated` SELECT saja, dengan syarat
-`owner_id = auth.uid()` dan klaim `client_id` tidak kosong. Hak `anon`/`PUBLIC`
-dicabut. Token login biasa tanpa `client_id` tidak memperoleh baris memori.
-Grant service-role hanya untuk bootstrap lokal; tidak ada policy tulis pengguna.
+Model RLS memberi `authenticated` SELECT, INSERT kolom terbatas, dan UPDATE
+hanya untuk `canon_status` serta `details`. Semua policy mensyaratkan
+`owner_id = auth.uid()` dan klaim `client_id` tidak kosong. Insert tidak dapat
+menentukan `owner_id` atau `canon_status`, sedangkan update hanya mengizinkan
+transisi draft milik sendiri menjadi canon. Hak `anon`/`PUBLIC` dicabut. Token
+login biasa tanpa `client_id` tidak memperoleh atau menulis baris memori. Grant
+service-role hanya dipakai untuk bootstrap fixture lokal.
 
 ## Cakupan verifikasi
 
-Suite menguji HTTP OAuth/consent, ketiga tool MCP, filter, pagination, exact
-total, dan isolasi RLS dua pengguna. Tidak menjalankan browser Next.js atau
-klien ChatGPT, tidak membuktikan kesamaan konfigurasi produksi, dan bukan audit
-keamanan menyeluruh. Pencabutan grant tidak harus langsung membatalkan JWT yang
-belum kedaluwarsa pada verifier JWKS; jangan mengasumsikan introspeksi sesi.
+Suite menguji HTTP OAuth/consent, kelima tool MCP, filter, pagination, exact
+total, idempotensi create, promosi draft ke canon, dan isolasi RLS dua pengguna.
+Tidak menjalankan browser Next.js atau klien ChatGPT, tidak membuktikan kesamaan
+konfigurasi produksi, dan bukan audit keamanan menyeluruh. Pencabutan grant
+tidak harus langsung membatalkan JWT yang belum kedaluwarsa pada verifier JWKS;
+jangan mengasumsikan introspeksi sesi.
 
 Workflow `.github/workflows/charmaine-integration.yml` menjalankan stack
 container sementara di GitHub Actions tanpa secret hosted atau deployment. Host
