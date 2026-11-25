@@ -100,6 +100,8 @@ function input(overrides: Record<string, unknown> = {}) {
     idempotency_key: IDEMPOTENCY_KEY,
     title: "Project Charmaine dimulai",
     memory_text: "Kami mulai menyusun otak memori Charmaine.",
+    factual_core: ["Project Charmaine mulai disusun bersama Pit."],
+    continuity_mode: "shared_experience",
     memory_type: "event",
     tags: ["project", "charmaine"],
     ...overrides,
@@ -120,9 +122,44 @@ Deno.test("schema rejects ownership and canon overrides", () => {
   assert.throws(() => input({ importance: 6 }));
   assert.throws(() => input({ idempotency_key: "not-a-uuid" }));
   assert.throws(() => input({ memory_type: "plan" }));
+  assert.throws(() => input({ perspective: "pit" }));
   assert.throws(() => input({ expected_at: "2026-12-01T12:00:00+07:00" }));
   assert.throws(() => input({ details: { canonization: {} } }));
   assert.throws(() => input({ details: { request_hash: "caller-value" } }));
+  assert.throws(() => input({ details: { factual_core: ["bypass"] } }));
+});
+
+Deno.test("schema models human temporal precision without invented time", () => {
+  assert.equal(
+    input({
+      temporal_precision: "day",
+      occurred_on: "2024-02-29",
+      event_year: 2024,
+    }).occurred_on,
+    "2024-02-29",
+  );
+  assert.equal(
+    input({ temporal_precision: "year", event_year: 2014 }).event_year,
+    2014,
+  );
+  assert.equal(
+    input({ temporal_precision: "period", period: "awal masa SMP" }).period,
+    "awal masa SMP",
+  );
+
+  assert.throws(() =>
+    input({ temporal_precision: "day", occurred_on: "2023-02-29" })
+  );
+  assert.throws(() =>
+    input({
+      temporal_precision: "instant",
+      occurred_at: "2026-11-23T12:00:00+07:00",
+      event_year: 2025,
+    })
+  );
+  assert.throws(() =>
+    input({ temporal_precision: "unknown", event_year: 2026 })
+  );
 });
 
 Deno.test("memory key is random and collision-resistant in shape", () => {
@@ -139,6 +176,7 @@ Deno.test("create inserts an RLS-owned draft without owner input", async () => {
       fake.client,
       input({
         details: { note: "kept" },
+        temporal_precision: "instant",
         occurred_at: "2026-11-23T12:00:00+07:00",
       }),
     ),
@@ -156,6 +194,22 @@ Deno.test("create inserts an RLS-owned draft without owner input", async () => {
   assert.deepEqual(row.people, []);
   assert.equal((row.details as Record<string, unknown>).note, "kept");
   assert.equal((row.details as Record<string, unknown>).memory_type, "event");
+  assert.deepEqual(
+    (row.details as Record<string, unknown>).factual_core,
+    ["Project Charmaine mulai disusun bersama Pit."],
+  );
+  assert.equal(
+    (row.details as Record<string, unknown>).continuity_mode,
+    "shared_experience",
+  );
+  assert.equal(
+    (row.details as Record<string, unknown>).temporal_precision,
+    "instant",
+  );
+  assert.deepEqual(
+    (row.details as Record<string, unknown>).uncertain_fields,
+    [],
+  );
   assert.equal(
     (row.details as Record<string, unknown>).occurred_at,
     "2026-11-23T12:00:00+07:00",
@@ -249,4 +303,20 @@ Deno.test("database errors do not leak database details", async () => {
   const insertResult = await createMemory(insertFailure.client, input());
   assert.equal(insertResult.isError, true);
   assert.doesNotMatch(insertResult.content[0].text, /secret/);
+});
+
+Deno.test("stored metadata stays within the correction RPC ceiling", async () => {
+  const fake = fakeClient();
+  const result = await createMemory(
+    fake.client,
+    input({
+      factual_core: Array.from({ length: 20 }, () => "f".repeat(500)),
+      uncertain_fields: Array.from({ length: 50 }, () => "u".repeat(120)),
+      details: { note: "n".repeat(3_000) },
+    }),
+  );
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /terlalu besar/);
+  assert.equal(fake.inserted.length, 0);
 });
