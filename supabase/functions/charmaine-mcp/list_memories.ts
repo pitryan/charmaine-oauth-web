@@ -4,7 +4,7 @@ import { normalizeCategory } from "./categories.ts";
 import { presentMemory } from "./memory_output.ts";
 
 const MEMORY_COLUMNS =
-  "memory_key,title,memory_text,period,school_year,event_year,category," +
+  "memory_key,title,memory_text,perspective,period,school_year,event_year,category," +
   "people,tags,emotion,canon_status,clarity,importance,created_at,details";
 
 export const listMemoriesSchema = z.object({

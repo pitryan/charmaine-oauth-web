@@ -435,6 +435,8 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
 
       const rejected = await client.toolResult("promote_memory", {
         memory_key: "LOCAL-017",
+        expected_title: "LOCAL FIXTURE LOCAL-017",
+        confirmation: "JADIKAN CANON",
       });
       assert.equal(rejected.isError, true);
 
@@ -509,12 +511,27 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         memory_text:
           "LOCAL WRITE shared-write-marker A_ONLY project masih berjalan",
         memory_type: "event",
+        factual_core: [
+          "Pit mengonfirmasi pengujian alur tulis Charmaine Memory.",
+        ],
+        continuity_mode: "shared_experience",
+        temporal_precision: "day",
+        uncertain_fields: ["exact_time"],
         period: "masa_kini",
         event_year: 2026,
         category: "project",
         tags: ["local-integration", "write-test"],
-        occurred_at: "2026-11-23T12:00:00+07:00",
+        occurred_on: "2026-11-23",
+        temporal_note: "Tanggal diketahui, jam kejadian tidak diketahui.",
       };
+
+      const contradictory = await clientA.toolResult("create_memory", {
+        ...draft,
+        idempotency_key: "33333333-3333-4333-8333-333333333333",
+        title: "LOCAL WRITE contradictory time",
+        occurred_at: "2026-11-23T12:00:00+07:00",
+      });
+      assert.equal(contradictory.isError, true);
 
       const created = jsonContent(await clientA.tool("create_memory", draft));
       assert.equal(created.replayed, false);
@@ -552,6 +569,24 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         }),
       );
       assert.deepEqual(keys(foundA), [memoryKey]);
+      assert.deepEqual(foundA.memories[0]?.factual_core, draft.factual_core);
+      assert.equal(
+        foundA.memories[0]?.continuity_mode,
+        draft.continuity_mode,
+      );
+      assert.equal(
+        foundA.memories[0]?.temporal_precision,
+        draft.temporal_precision,
+      );
+      assert.equal(foundA.memories[0]?.occurred_on, draft.occurred_on);
+      assert.ok(!("occurred_at" in foundA.memories[0]));
+      const foundByTitle = memories(
+        await clientA.tool("search_memories", {
+          query: "shared draft A_ONLY",
+          canon_status: "draft",
+        }),
+      );
+      assert.deepEqual(keys(foundByTitle), [memoryKey]);
       const foundB = memories(
         await clientB.tool("search_memories", {
           query: "shared-write-marker",
@@ -562,6 +597,8 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
 
       const foreignPromotion = await clientB.toolResult("promote_memory", {
         memory_key: memoryKey,
+        expected_title: draft.title,
+        confirmation: "JADIKAN CANON",
       });
       assert.equal(foreignPromotion.isError, true);
       assert.match(contentText(foreignPromotion), /tidak ditemukan/i);
@@ -569,7 +606,8 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
       const promoted = jsonContent(
         await clientA.tool("promote_memory", {
           memory_key: memoryKey,
-          occurred_at: "2026-11-23T12:00:00+07:00",
+          expected_title: draft.title,
+          confirmation: "JADIKAN CANON",
           note: "Project selesai dan sudah dikonfirmasi.",
         }),
       );
@@ -580,7 +618,11 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
       );
 
       const promotionReplay = jsonContent(
-        await clientA.tool("promote_memory", { memory_key: memoryKey }),
+        await clientA.tool("promote_memory", {
+          memory_key: memoryKey,
+          expected_title: draft.title,
+          confirmation: "JADIKAN CANON",
+        }),
       );
       assert.equal(promotionReplay.promoted, false);
       assert.equal(promotionReplay.already_canon, true);
@@ -784,6 +826,38 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
       assert.equal(plainDeletion.isError, true);
 
       const a = await authorize(config, metadata, clientId, config.users.a);
+      const malformedSemantics = await rest(config, a.access_token, "", {
+        method: "POST",
+        body: JSON.stringify({
+          memory_key: "LOCAL-INVALID-SEMANTICS",
+          title: "Synthetic invalid semantic write",
+          memory_text: "LOCAL FIXTURE invalid date-only memory",
+          perspective: "charmaine",
+          event_year: 2026,
+          origin: "mcp_user_entry",
+          details: {
+            memory_type: "event",
+            factual_core: ["A deliberately invalid date is supplied."],
+            continuity_mode: "told_by_pit",
+            temporal_precision: "day",
+            uncertain_fields: [],
+            occurred_on: "2026-02-30",
+          },
+        }),
+      });
+      const malformedError = await jsonResponse(
+        malformedSemantics,
+        "Rejected malformed semantics",
+      );
+      assert.ok(
+        malformedSemantics.status === 400 || malformedSemantics.status === 403,
+        "Malformed semantics must be rejected by RLS or the check constraint",
+      );
+      assert.ok(
+        malformedError.code === "42501" || malformedError.code === "23514",
+        "Malformed semantics must fail policy or semantic validation",
+      );
+
       const hidden = await rest(
         config,
         a.access_token,
@@ -825,7 +899,7 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
         "Update must be denied by database privileges/RLS",
       );
 
-      const foreignPromotion = await rest(
+      const directPromotion = await rest(
         config,
         a.access_token,
         "?memory_key=eq.LOCAL-002",
@@ -837,8 +911,12 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
           }),
         },
       );
-      assert.equal(foreignPromotion.status, 200);
-      assert.deepEqual(await foreignPromotion.json(), []);
+      const directPromotionError = await jsonResponse(
+        directPromotion,
+        "Denied direct promotion",
+      );
+      assert.equal(directPromotion.status, 403);
+      assert.equal(directPromotionError.code, "42501");
 
       const b = await authorize(config, metadata, clientId, config.users.b);
       const clientB = new McpClient(config, b.access_token);

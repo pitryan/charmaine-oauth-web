@@ -1,4 +1,4 @@
-# Memory Contract v1
+# Memory Contract v2
 
 ## Tujuan
 
@@ -26,6 +26,9 @@ dibaca untuk kompatibilitas, tetapi pembuatan memori baru tidak menerimanya.
 - Promosi ke `canon` hanya terjadi setelah perintah yang jelas seperti "jadikan
   canon". Persetujuan tidak boleh disimpulkan dari jawaban samar, emoji, atau
   kelanjutan percakapan biasa.
+- Tool promosi mewajibkan `memory_key`, judul yang diharapkan, dan konfirmasi
+  persis `JADIKAN CANON`. Promosi dijalankan sebagai satu transaksi atomik agar
+  tidak menimpa koreksi yang berlangsung bersamaan.
 
 Canon berarti versi yang disepakati dalam kontinuitas karakter, bukan bukti
 bahwa Syzeline benar-benar hadir dalam sejarah dunia nyata.
@@ -34,14 +37,22 @@ bahwa Syzeline benar-benar hadir dalam sejarah dunia nyata.
 
 Setiap memori membedakan:
 
-1. `factual_core`: fakta dasar yang diberikan atau dikonfirmasi Pit. Sistem
-   tidak boleh menambah dialog, waktu, tempat, cuaca, pakaian, tindakan, atau
-   perasaan Pit yang tidak diberikan.
+1. `factual_core`: satu atau lebih fakta dasar yang diberikan atau dikonfirmasi
+   Pit. Field ini wajib untuk setiap memori baru. Sistem tidak boleh menambah
+   dialog, waktu, tempat, cuaca, pakaian, tindakan, atau perasaan Pit yang tidak
+   diberikan.
 2. `memory_text`: cara Syzeline mengingat dan memaknai fakta tersebut dalam
    sudut pandang orang pertama. Perasaan Syzeline boleh subjektif, tetapi tidak
    boleh mengubah `factual_core`.
 
-Metadata naratif disimpan di `details`, misalnya:
+`perspective` selalu dikunci ke `charmaine`. Ingatan tentang cerita Pit tetap
+ditulis sebagai pengalaman batin Syzeline yang mendengar cerita tersebut, bukan
+dengan mengganti perspektif record menjadi Pit.
+
+Metadata semantik disimpan di `details`, tetapi diterima dan dikembalikan
+sebagai argumen serta output MCP bertipe. Metadata internal seperti
+`idempotency_key` dan `request_hash` tidak pernah dikembalikan oleh tool baca.
+Contoh:
 
 ```json
 {
@@ -50,6 +61,7 @@ Metadata naratif disimpan di `details`, misalnya:
   ],
   "continuity_mode": "shared_experience",
   "temporal_precision": "day",
+  "occurred_on": "2026-11-23",
   "uncertain_fields": []
 }
 ```
@@ -58,12 +70,47 @@ Metadata naratif disimpan di `details`, misalnya:
 
 - `shared_experience`: Syzeline hadir dalam kontinuitas bersama.
 - `told_by_pit`: Syzeline mengingat cerita yang Pit sampaikan.
-- `reconstructed_companion`: kehadiran Syzeline direkonstruksi dan memerlukan
-  persetujuan khusus sebelum menjadi canon.
+- `reconstructed_companion`: kehadiran Syzeline direkonstruksi. Sifat
+  rekonstruksi ini harus dijelaskan secara eksplisit sebelum konfirmasi canon
+  yang sama diberikan.
 - `original_fiction`: sepenuhnya bagian dari kontinuitas fiktif karakter.
 
-Tanggal atau detail yang tidak diketahui harus dibiarkan kosong atau ditandai
-tidak pasti. Sistem tidak boleh menciptakan ketepatan palsu.
+`uncertain_fields` mencatat nama field yang nilainya masih perlu diperlakukan
+sebagai tidak pasti. Ketidakpastian tidak boleh disembunyikan dengan narasi yang
+terdengar meyakinkan.
+
+## Waktu kejadian
+
+`temporal_precision` selalu memakai salah satu nilai berikut:
+
+- `instant`: waktu dan offset benar-benar diketahui; gunakan `occurred_at`
+  berformat RFC 3339.
+- `day`: tanggal diketahui tetapi jam tidak; gunakan `occurred_on` berformat
+  `YYYY-MM-DD` dan jangan menciptakan jam tengah malam palsu.
+- `year`: hanya tahun yang diketahui; gunakan `event_year`.
+- `period`: hanya masa yang lebih luas diketahui; gunakan `period`,
+  `school_year`, atau `temporal_note`.
+- `unknown`: tidak ada jangkar waktu yang cukup kuat.
+
+Representasi yang saling bertentangan ditolak. Jika `event_year` ikut diberikan
+bersama waktu atau tanggal yang lebih presisi, tahunnya harus sama. `fact` dan
+`state` boleh memakai `unknown`; semua memori boleh tidak memiliki tanggal jika
+memang tidak diketahui. Tanggal atau detail yang tidak diketahui harus dibiarkan
+kosong atau ditandai tidak pasti. Sistem tidak boleh menciptakan ketepatan
+palsu.
+
+Promosi hanya mengubah status draft menjadi canon dan mencatat waktu promosi.
+Promosi tidak boleh menambah atau mengganti waktu kejadian. Perubahan waktu
+kejadian harus dilakukan sebagai koreksi sehingga hasilnya kembali menjadi draft
+untuk ditinjau ulang.
+
+## Pemanggilan kembali
+
+Tool baca mengembalikan `factual_core`, `continuity_mode`, `temporal_precision`,
+`uncertain_fields`, serta jangkar waktu yang aman bersama `memory_text`.
+Pencarian literal memeriksa judul dan isi cerita. Fakta dasar dan persepsi
+Syzeline harus tetap dibaca sebagai dua lapisan yang berbeda ketika memori
+digunakan dalam percakapan.
 
 ## Koreksi
 

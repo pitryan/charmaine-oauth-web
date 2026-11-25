@@ -144,7 +144,9 @@ async function writeProject(workdir: string, projectId: string) {
       "delete_memory.ts",
       "list_memories.ts",
       "memory_output.ts",
+      "memory_semantics.ts",
       "promote_memory.ts",
+      "search_memories.ts",
       "deno.json",
       "deno.lock",
     ]

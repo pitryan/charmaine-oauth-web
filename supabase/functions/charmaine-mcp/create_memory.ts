@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { SupabaseContext } from "@supabase/server";
+import {
+  addTemporalConsistencyIssues,
+  semanticMemoryFields,
+} from "./memory_semantics.ts";
 
 const shortText = z.string().trim().min(1).max(120);
 const optionalText = (maximum: number) =>
@@ -16,6 +20,12 @@ const memoryDetails = z.record(z.string(), z.unknown()).refine(
       "idempotency_key",
       "request_hash",
       "canonization",
+      "factual_core",
+      "continuity_mode",
+      "temporal_precision",
+      "uncertain_fields",
+      "occurred_on",
+      "temporal_note",
     ].every((key) => !(key in value)),
   "Details memakai nama metadata internal.",
 );
@@ -24,7 +34,7 @@ export const createMemorySchema = z.object({
   idempotency_key: z.string().uuid(),
   title: z.string().trim().min(1).max(200),
   memory_text: z.string().trim().min(1).max(20_000),
-  perspective: shortText.default("charmaine"),
+  perspective: z.literal("charmaine").default("charmaine"),
   period: optionalText(160),
   school_year: optionalText(40),
   event_year: z.number().int().min(1).max(9999).nullable().optional(),
@@ -36,12 +46,16 @@ export const createMemorySchema = z.object({
   importance: z.number().int().min(1).max(5).default(3),
   memory_type: z.enum(["event", "fact", "state"]).default("event"),
   occurred_at: z.string().datetime({ offset: true }).nullable().optional(),
+  ...semanticMemoryFields,
   details: memoryDetails.default({}),
-}).strict();
+}).strict().superRefine(addTemporalConsistencyIssues);
 
 type CreateMemoryInput = z.output<typeof createMemorySchema>;
 
 const RESULT_COLUMNS = "memory_key,title,canon_status,created_at,details";
+// Keep newly created details safely below the correction RPC's 20,000
+// character ceiling, including the small formatting expansion of jsonb::text.
+const MAX_STORED_DETAILS_JSON = 18_000;
 
 type MemoryResult = {
   memory_key: string;
@@ -164,20 +178,36 @@ export async function createMemory(
     idempotency_key,
     memory_type,
     occurred_at,
+    factual_core,
+    continuity_mode,
+    temporal_precision,
+    uncertain_fields,
+    occurred_on,
+    temporal_note,
     details,
     ...fields
   } = input;
+  const storedDetails = {
+    ...details,
+    memory_type,
+    occurred_at: occurred_at ?? null,
+    factual_core,
+    continuity_mode,
+    temporal_precision,
+    uncertain_fields,
+    ...(occurred_on === undefined ? {} : { occurred_on }),
+    ...(temporal_note === undefined ? {} : { temporal_note }),
+    idempotency_key,
+    request_hash: hash,
+  };
+  if (JSON.stringify(storedDetails).length > MAX_STORED_DETAILS_JSON) {
+    return error("Metadata memori terlalu besar.");
+  }
   const row = {
     ...fields,
     memory_key: memoryKey,
     origin: "mcp_user_entry",
-    details: {
-      ...details,
-      memory_type,
-      occurred_at: occurred_at ?? null,
-      idempotency_key,
-      request_hash: hash,
-    },
+    details: storedDetails,
   };
 
   const { data, error: insertError } = await supabase

@@ -6,7 +6,7 @@ Website persetujuan OAuth tetap menggunakan Next.js di root repository.
 
 Aturan tentang jenis memori, pemisahan fakta dari sudut pandang Syzeline,
 promosi canon, koreksi, dan penghapusan permanen berada di
-[Memory Contract v1](MEMORY_CONTRACT.md). Pembuatan baru hanya menerima `event`,
+[Memory Contract v2](MEMORY_CONTRACT.md). Pembuatan baru hanya menerima `event`,
 `fact`, dan `state`. Nilai `plan` lama tetap dapat dibaca dan difilter untuk
 kompatibilitas, tetapi tidak diterima oleh `create_memory`.
 
@@ -47,10 +47,20 @@ menaik. Respons JSON di dalam konten teks MCP mempertahankan:
 - `offset`: posisi awal halaman.
 - `memories`: data hasil query, termasuk `canon_status` dan `clarity` asli.
 
-Metadata percakapan dari `details` disajikan sebagai `memory_type`,
-`expected_at`, `occurred_at`, dan `canonization`. `expected_at` tetap disajikan
-untuk kompatibilitas memori lama bertipe `plan`. Nilai internal seperti
-`idempotency_key` dan `request_hash` tidak pernah dikembalikan oleh tool baca.
+Metadata semantik disimpan di `details` JSONB, tetapi disajikan sebagai field
+MCP bertipe: `factual_core`, `continuity_mode`, `temporal_precision`,
+`uncertain_fields`, `occurred_on`, `temporal_note`, `memory_type`,
+`occurred_at`, dan `canonization`. `expected_at` tetap disajikan untuk
+kompatibilitas memori lama bertipe `plan`. Nilai internal dan metadata bebas
+seperti `idempotency_key` serta `request_hash` tidak pernah dikembalikan oleh
+tool baca. Kolom `perspective` untuk memori baru selalu `charmaine`.
+
+Gunakan `occurred_at` hanya jika waktu dan offset benar-benar diketahui. Gunakan
+`occurred_on` untuk tanggal tanpa jam, `event_year` untuk tahun saja, serta
+`period`, `school_year`, atau `temporal_note` untuk masa yang lebih luas. Nilai
+`temporal_precision` adalah `instant`, `day`, `year`, `period`, atau `unknown`.
+Kombinasi waktu yang kontradiktif ditolak. Promosi canon tidak mengubah metadata
+waktu kejadian; koreksi waktu selalu mengembalikan memori menjadi draft.
 
 ## Pengujian lokal
 
@@ -78,8 +88,9 @@ dari direktori fungsi, lalu tinjau perubahan lockfile:
 
 ```sh
 deno check --frozen=false index.ts list_memories_test.ts \
-  memory_output_test.ts create_memory_test.ts promote_memory_test.ts \
-  correct_memory_test.ts delete_memory_test.ts
+  search_memories_test.ts memory_semantics_test.ts memory_output_test.ts \
+  create_memory_test.ts promote_memory_test.ts correct_memory_test.ts \
+  delete_memory_test.ts
 ```
 
 `vercel.json` di root menonaktifkan deployment website otomatis. Workflow
@@ -87,10 +98,17 @@ deno check --frozen=false index.ts list_memories_test.ts \
 `main` juga memicu `deploy-charmaine-mcp.yml`, yang menguji lalu men-deploy Edge
 Function produksi. Migration SQL tidak diterapkan oleh workflow tersebut dan
 harus ditinjau serta diterapkan **sebelum** perubahan fungsi digabungkan atau
-dipush ke `main`. Migration menambahkan RPC terbatas untuk koreksi dan hard
-delete tanpa memberikan hak `DELETE` tabel secara langsung. Jika urutannya
-terbalik, tool tulis dapat terlihat tetapi akan gagal karena RPC produksinya
-belum tersedia.
+dipush ke `main`.
+
+Migration lama tetap diterapkan menurut urutan nama file. Untuk Edge Function
+v0.5.0, file baru yang wajib diterapkan adalah
+`supabase/migrations/20261124000000_charmaine_memory_semantics.sql`. File ini
+menambahkan validator semantik/waktu dan RPC promosi atomik, lalu mencabut hak
+`UPDATE` tabel langsung dari `authenticated`. RPC koreksi dan hard delete tetap
+berasal dari `20261123010000_charmaine_memory_correction_delete.sql`. Tidak ada
+hak `DELETE` tabel langsung yang diberikan. Jika urutannya terbalik, tool baru
+dapat terlihat tetapi RPC dan perlindungan database yang dibutuhkannya belum
+aktif.
 
 ## Kesesuaian konteks proyek
 
@@ -102,13 +120,14 @@ menjadi referensi tujuan dan batas proyek. Saat dibandingkan dengan source pada
   `18f0d483`. Branch PR #1 menambahkan normalisasi alias sebelum filter `.eq`
   yang sama. Status "IN PROGRESS" dalam dokumen mencakup pengerjaan yang kini
   siap ditinjau; bukan bukti bahwa kode PR sudah aktif di endpoint produksi.
-- `search_memories` tetap mencari substring pada `memory_text` saja, tetapi
-  dapat difilter ke `draft` atau `canon`. Pencarian judul, tokoh, tags, dan
-  semantic retrieval tetap roadmap.
-- Dokumen menyatakan 73 memori kelas 1 seluruhnya `draft`. Fixture tes dengan
-  status campuran dan tahun lain adalah data sintetis untuk menguji perilaku,
-  bukan salinan atau laporan isi database. Pengujian mempertahankan keempat
-  status `draft`, `canon`, `archived`, `au`, serta `clarity: unspecified`.
+- `search_memories` mencari substring literal pada `title` dan `memory_text`,
+  serta dapat difilter ke `draft` atau `canon`. Pencarian tokoh, tags,
+  `factual_core`, dan semantic retrieval tetap roadmap.
+- Angka 73 memori kelas 1 dalam dokumen adalah snapshot historis sebelum reset
+  memori yang disengaja, bukan ekspektasi keadaan produksi saat ini. Fixture tes
+  dengan status campuran dan tahun lain tetap data sintetis untuk menguji
+  perilaku, bukan salinan database. Pengujian mempertahankan keempat status
+  `draft`, `canon`, `archived`, `au`, serta `clarity: unspecified`.
 - Schema produksi dan policy baca diverifikasi kembali pada 2026-11-23 sebelum
   migration write disusun. Repository menyimpan migration write yang tetap harus
   diterapkan secara manual; fixture integrasi tetap bukan salinan data produksi.
@@ -148,18 +167,19 @@ rollback runtime dan policy database harus dilakukan terpisah.
 
 `index.ts` tetap memasang `withOAuthProtectedResource()` diikuti
 `withSupabase({ auth: "user" })`. Semua modul menerima klien pengguna dari
-request yang sama dan tidak membuat klien admin. Baca, pembuatan, dan promosi
-tetap tunduk pada RLS. RPC `SECURITY DEFINER` untuk koreksi dan penghapusan
+request yang sama dan tidak membuat klien admin. Baca dan pembuatan tetap tunduk
+pada RLS. RPC `SECURITY DEFINER` untuk promosi, koreksi, dan penghapusan
 memeriksa ulang `auth.uid()`, OAuth `client_id`, pemilik record, serta judul
 target tanpa memperluas privilege tabel langsung. `create_memory` tidak menerima
-`owner_id` atau `canon_status` dan selalu memakai default database `draft`;
-`promote_memory` hanya melakukan transisi milik pengguna dari `draft` ke
-`canon`. `correct_memory` mengganti field yang diminta dan selalu mengembalikan
-hasilnya ke `draft` untuk konfirmasi ulang. `delete_memory` melakukan hard
-delete; tidak ada tombstone, arsip, atau salinan isi di tingkat aplikasi.
-Keduanya memakai respons generik untuk target yang tidak ada atau bukan milik
-pengguna agar tidak membocorkan keberadaan data lintas pemilik. Backup, WAL, dan
-log yang dikelola penyedia tetap mengikuti kebijakan retensi Supabase.
+`owner_id` atau `canon_status` dan selalu memakai default database `draft`.
+`promote_memory` memakai RPC atomik yang juga memerlukan konfirmasi persis
+`JADIKAN CANON`; `authenticated` tidak memiliki hak `UPDATE` tabel langsung.
+`correct_memory` mengganti field yang diminta dan selalu mengembalikan hasilnya
+ke `draft` untuk konfirmasi ulang. `delete_memory` melakukan hard delete; tidak
+ada tombstone, arsip, atau salinan isi di tingkat aplikasi. Ketiga tool mutasi
+memakai respons generik untuk target yang tidak ada atau bukan milik pengguna
+agar tidak membocorkan keberadaan data lintas pemilik. Backup, WAL, dan log yang
+dikelola penyedia tetap mengikuti kebijakan retensi Supabase.
 
 Aturan gaya bicara dan autobiografi karakter berada di luar lapisan
 penyimpanan/pencarian ini. Persona sebaiknya disimpan dalam instruksi agent,

@@ -45,6 +45,10 @@ function input(overrides: Record<string, unknown> = {}) {
     changes: {
       title: " Judul yang dikoreksi ",
       memory_type: "event",
+      factual_core: ["Pit mengonfirmasi judul memori yang benar."],
+      continuity_mode: "shared_experience",
+      temporal_precision: "instant",
+      uncertain_fields: [],
       occurred_at: "2026-11-23T16:00:00+07:00",
       details_patch: { source_note: "Dikonfirmasi Pit" },
     },
@@ -76,6 +80,22 @@ Deno.test("schema validates correction fields and internal detail keys", () => {
   assert.throws(() => input({ changes: { event_year: 0 } }));
   assert.throws(() => input({ changes: { memory_type: "plan" } }));
   assert.throws(() => input({ changes: { occurred_at: "yesterday" } }));
+  assert.throws(() =>
+    input({ changes: { occurred_at: "2026-11-23T16:00:00+07:00" } })
+  );
+  assert.throws(() =>
+    input({
+      changes: {
+        temporal_precision: "day",
+        occurred_on: "2023-02-29",
+      },
+    })
+  );
+  assert.throws(() =>
+    input({
+      changes: { temporal_precision: "unknown", event_year: 2026 },
+    })
+  );
 
   for (
     const key of [
@@ -87,6 +107,12 @@ Deno.test("schema validates correction fields and internal detail keys", () => {
       "canonization",
       "corrected_at",
       "correction_history",
+      "factual_core",
+      "continuity_mode",
+      "temporal_precision",
+      "uncertain_fields",
+      "occurred_on",
+      "temporal_note",
     ]
   ) {
     assert.throws(() =>
@@ -112,7 +138,18 @@ Deno.test("calls the correction RPC with trimmed validated input", async () => {
         title: "Judul yang dikoreksi",
         memory_type: "event",
         occurred_at: "2026-11-23T16:00:00+07:00",
-        details_patch: { source_note: "Dikonfirmasi Pit" },
+        event_year: null,
+        period: null,
+        school_year: null,
+        details_patch: {
+          source_note: "Dikonfirmasi Pit",
+          factual_core: ["Pit mengonfirmasi judul memori yang benar."],
+          continuity_mode: "shared_experience",
+          uncertain_fields: [],
+          temporal_precision: "instant",
+          occurred_on: null,
+          temporal_note: null,
+        },
       },
     },
   }]);
@@ -122,6 +159,30 @@ Deno.test("calls the correction RPC with trimmed validated input", async () => {
       memory_key: "memory-001",
       title: "Judul yang dikoreksi",
       canon_status: "draft",
+    },
+  });
+});
+
+Deno.test("day-only correction clears stale clock fields atomically", async () => {
+  const fake = new FakeClient();
+  const parsed = input({
+    changes: {
+      temporal_precision: "day",
+      occurred_on: "2024-02-29",
+      event_year: 2024,
+    },
+  });
+  await correctMemory(fake as unknown as CorrectMemoryClient, parsed);
+
+  assert.deepEqual(fake.calls[0].args.p_changes, {
+    occurred_at: null,
+    event_year: 2024,
+    period: null,
+    school_year: null,
+    details_patch: {
+      temporal_precision: "day",
+      occurred_on: "2024-02-29",
+      temporal_note: null,
     },
   });
 });

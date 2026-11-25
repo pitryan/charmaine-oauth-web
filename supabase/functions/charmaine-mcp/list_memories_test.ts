@@ -243,7 +243,7 @@ Deno.test("omitted filters retain projection, exact count, order, and defaults",
   assert.deepEqual(f.calls, {
     table: "charmaine_memories",
     columns:
-      "memory_key,title,memory_text,period,school_year,event_year,category," +
+      "memory_key,title,memory_text,perspective,period,school_year,event_year,category," +
       "people,tags,emotion,canon_status,clarity,importance,created_at,details",
     count: "exact",
   });

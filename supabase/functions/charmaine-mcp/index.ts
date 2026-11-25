@@ -12,8 +12,8 @@ import { correctMemory, correctMemorySchema } from "./correct_memory.ts";
 import { createMemory, createMemorySchema } from "./create_memory.ts";
 import { deleteMemory, deleteMemorySchema } from "./delete_memory.ts";
 import { listMemories, listMemoriesSchema } from "./list_memories.ts";
-import { presentMemory } from "./memory_output.ts";
 import { promoteMemory, promoteMemorySchema } from "./promote_memory.ts";
+import { searchMemories, searchMemoriesSchema } from "./search_memories.ts";
 
 Deno.serve(
   pipeline(
@@ -25,7 +25,7 @@ Deno.serve(
       const handler = createMcpHandler(() => {
         const server = new McpServer({
           name: "charmaine-mcp",
-          version: "0.4.0",
+          version: "0.5.0",
         });
 
         // Tool pertama: tes koneksi
@@ -50,66 +50,14 @@ Deno.serve(
         server.registerTool(
           "search_memories",
           {
-            description: "Cari ingatan Charmaine berdasarkan isi cerita. " +
+            description:
+              "Cari ingatan Charmaine berdasarkan judul atau isi cerita. " +
               "Hanya membaca memori yang diizinkan RLS. " +
               "Bisa dibatasi ke draft atau canon; status selalu dipertahankan.",
-            inputSchema: z.object({
-              query: z.string().trim().min(2).max(100),
-              canon_status: z.enum(["draft", "canon"]).optional(),
-              memory_type: z.enum(["event", "fact", "plan", "state"])
-                .optional(),
-              limit: z.number().int().min(1).max(10).default(5),
-            }),
+            inputSchema: searchMemoriesSchema,
             annotations: { readOnlyHint: true },
           },
-          async ({ query, canon_status, memory_type, limit }) => {
-            // Menggunakan client OAuth milik pengguna.
-            // RLS tetap berlaku.
-            let search = supabase
-              .from("charmaine_memories")
-              .select(
-                "memory_key,title,memory_text,period," +
-                  "school_year,event_year,category,origin," +
-                  "canon_status,clarity,details",
-              )
-              .ilike("memory_text", `%${query}%`)
-              .order("created_at", { ascending: false })
-              .limit(limit);
-
-            if (canon_status) {
-              search = search.eq("canon_status", canon_status);
-            }
-
-            if (memory_type) {
-              search = search.eq("details->>memory_type", memory_type);
-            }
-
-            const { data, error } = await search;
-
-            if (error) {
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: "text",
-                    text: `Pencarian gagal: ${error.message}`,
-                  },
-                ],
-              };
-            }
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({
-                    count: data?.length ?? 0,
-                    memories: (data ?? []).map((row) => presentMemory(row)),
-                  }),
-                },
-              ],
-            };
-          },
+          (args) => searchMemories(supabase, args),
         );
 
         server.registerTool(
@@ -131,6 +79,8 @@ Deno.serve(
             description: "Simpan ingatan autobiografis baru sebagai draft. " +
               "Memori baru hanya berupa event, fact, atau state; rencana dan " +
               "daftar tugas tidak disimpan sebagai memori jangka panjang. " +
+              "Fakta dasar, mode kontinuitas, dan ketepatan waktu wajib " +
+              "dibedakan dari narasi subjektif Syzeline. " +
               "Tool ini tidak dapat menentukan owner atau membuat canon.",
             inputSchema: createMemorySchema,
             annotations: {
@@ -148,6 +98,9 @@ Deno.serve(
             description:
               "Jadikan memori draft sebagai canon setelah pengguna " +
               "mengonfirmasi bahwa event, fact, atau state tersebut benar. " +
+              "Target harus menyertakan memory_key, judul yang diharapkan, " +
+              "dan konfirmasi persis JADIKAN CANON. " +
+              "Promosi tidak dapat menambah atau mengubah waktu kejadian. " +
               "Draft plan lama tidak dapat dipromosikan. Hanya memori milik " +
               "sesi OAuth yang dapat dipromosikan.",
             inputSchema: promoteMemorySchema,
@@ -166,7 +119,9 @@ Deno.serve(
             description: "Koreksi isi memori milik pengguna secara permanen " +
               "setelah target dan judulnya dikonfirmasi. Isi lama tidak " +
               "disimpan sebagai revisi. Memori hasil koreksi selalu kembali " +
-              "menjadi draft agar dapat diperiksa sebelum dijadikan canon.",
+              "menjadi draft agar dapat diperiksa sebelum dijadikan canon. " +
+              "Koreksi waktu mengganti seluruh kelompok jangkar waktu agar " +
+              "tidak menyisakan tanggal yang saling bertentangan.",
             inputSchema: correctMemorySchema,
             annotations: {
               readOnlyHint: false,
