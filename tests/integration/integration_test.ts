@@ -582,7 +582,7 @@ Deno.test("real local OAuth, MCP and two-user RLS", async (t) => {
       assert.ok(!("occurred_at" in foundA.memories[0]));
       const foundByTitle = memories(
         await clientA.tool("search_memories", {
-          query: "shared draft A_ONLY",
+          query: "project draft",
           canon_status: "draft",
         }),
       );
